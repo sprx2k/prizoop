@@ -27,8 +27,10 @@ jobs:
 
       - name: Install fxsdk & gint toolchain
         run: |
-          python3 /tmp/giteapc/giteapc.py install Lephenixnoir/fxsdk
-          python3 /tmp/giteapc/giteapc.py install Lephenixnoir/gint
+          yes | python3 /tmp/giteapc/giteapc.py install Lephenixnoir/fxsdk
+          yes | python3 /tmp/giteapc/giteapc.py install Lephenixnoir/OpenLibm
+          yes | python3 /tmp/giteapc/giteapc.py install Vhex-Kernel-Core/fxlibc
+          yes | python3 /tmp/giteapc/giteapc.py install Lephenixnoir/gint
 
       - name: Add fxsdk to PATH for later steps
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -53,8 +55,10 @@ jobs:
       - name: Verify built .g3a artifacts
         run: |
           mkdir -p dist
-          cp build-cw/prizoop_cw.g3a dist/prizoop_cw.g3a
-          cp build-cg/prizoop_cg.g3a dist/prizoop_cg.g3a
+          CW_G3A="$(find . -maxdepth 3 -name 'prizoop_cw.g3a' -print -quit)"
+          CG_G3A="$(find . -maxdepth 3 -name 'prizoop_cg.g3a' -print -quit)"
+          test -n "$CW_G3A" && cp "$CW_G3A" dist/prizoop_cw.g3a
+          test -n "$CG_G3A" && cp "$CG_G3A" dist/prizoop_cg.g3a
           ls -lh dist/
 
       - name: Upload fx-CG100 / Graph Math+ .g3a
