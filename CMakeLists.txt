@@ -1,46 +1,54 @@
-
 cmake_minimum_required(VERSION 3.15)
-project(prizoop_cg100 LANGUAGES C CXX)
+project(prizoop LANGUAGES C CXX ASM VERSION "01.00.0000")
 
-include($ENV{FXSDK}/lib/cmake/fxsdk.cmake)
-fxsdk_setup()
+set(PLATFORM "cw" CACHE STRING "Target Casio platform: cw (fx-CG100 / Graph Math+) or cg (fx-CG50)")
 
-# Collect Prizoop sources automatically from repo's src/
-# (Drop this file at the repo root, next to src/ and Makefile)
-file(GLOB_RECURSE PRIZOOP_SRCS
-     CONFIGURE_DEPENDS
-     "src/*.c" "src/*.cpp" "src/*.cc" "src/*.cxx")
+include(GenerateG3A)
 
-# Exclude Windows simulator/shims if present
-foreach(f ${PRIZOOP_SRCS})
-  if(f MATCHES "prizmsim|win32|windows|simulator")
-    list(REMOVE_ITEM PRIZOOP_SRCS ${f})
+configure_file(src/config.h.in include/config.h)
+add_compile_definitions(TARGET_PRIZM=1 DEBUG=0)
+
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.S")
+
+include_directories(
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  "${CMAKE_CURRENT_BINARY_DIR}/include")
+
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/utils/zx7"            "utils/zx7")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/utils/calctype"       "utils/calctype")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/utils/snd"            "utils/snd")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/utils/scope_timer"    "utils/scope_timer")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/utils/ptune2_simple"  "utils/ptune2_simple")
+
+add_executable(prizoop ${SOURCES})
+
+target_compile_options(prizoop PRIVATE
+  -O2 -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch
+  $<$<COMPILE_LANGUAGE:C>:-std=c99>
+  $<$<COMPILE_LANGUAGE:CXX>:-std=c++11 -fpermissive -fno-rtti
+    -fno-exceptions -fno-threadsafe-statics
+    -fno-use-cxa-get-exception-ptr>)
+
+target_link_options(prizoop PRIVATE
+  -L "${CMAKE_CURRENT_SOURCE_DIR}"
+  -T "${CMAKE_CURRENT_SOURCE_DIR}/prizm.ld"
+  -Wl,-Map=map -Wl,-print-memory-usage
+  -Wl,-gc-sections)
+
+target_link_libraries(prizoop PRIVATE
+  zx7 calctype snd scope_timer ptune2_simple
+  -lsyscall-${PLATFORM} -lc -lgint-cg -lc -lopenlibm -lgcc)
+
+if("${FXSDK_PLATFORM_LONG}" STREQUAL fxCG50)
+  if("${PLATFORM}" STREQUAL cw)
+    generate_g3a(TARGET prizoop OUTPUT "prizoop_cw.g3a"
+      NAME "Prizoop" ICONS icon-uns.png icon-sel.png)
+  else()
+    generate_g3a(TARGET prizoop OUTPUT "prizoop_cg.g3a"
+      NAME "Prizoop" ICONS icon-uns.png icon-sel.png)
   endif()
-endforeach()
-
-add_executable(prizoop_cg100
-    ${PRIZOOP_SRCS}
-    cmake/platform_cg100.c
-    cmake/ubc_hook.c
-    cmake/main_glue.c
-)
-
-target_compile_definitions(prizoop_cg100 PRIVATE FXCG100 PRIZOOP_SAFE_MEM)
-fxsdk_add_compile_options(prizoop_cg100 -O3 -m4a-nofpu -mb -ffunction-sections -fdata-sections)
-fxsdk_add_link_options(prizoop_cg100 -Wl,--gc-sections)
-
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(Gint REQUIRED)
-target_link_libraries(prizoop_cg100 Gint::Gint)
-
-set(G3A_NAME "Prizoop CG100")
-set(G3A_INTERNAL "PRIZOOPCG100")
-set(G3A_VERSION "0.1")
-
-fxsdk_add_g3a(TARGET prizoop_cg100 OUTPUT prizoop_cg100.g3a
-              NAME "${G3A_NAME}"
-              INTERNAL "${G3A_INTERNAL}"
-              VERSION "${G3A_VERSION}")
+endif()

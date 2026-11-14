@@ -9,6 +9,8 @@
 #include "ptune2_simple/Ptune2_direct.h"
 
 #include "screen_play.h"
+#include "config.h"
+#include "exam_mode.h"
 
 void screen_play::setup() {
 	loadedROM[0] = 0;
@@ -43,10 +45,18 @@ void screen_play::initRom() {
 	ResolveBG(bg_menu);
 
 	reset_printf();
+	if (isStorageLockedOrExamMode()) {
+		printf("Access denied: Exam Mode / Storage locked.\n");
+		loadedROM[0] = 0;
+		return;
+	}
+
 	printf("Loading file \"%s\"...\n", emulator.settings.selectedRom);
 
 	if (!loadROM(emulator.settings.selectedRom)) {
 		printf("Failed!\n");
+		loadedROM[0] = 0;
+		return;
 	}
 
 	sndStartup();
@@ -72,6 +82,11 @@ void screen_play::postStateChange() {
 bool bSoundEnabled = false;
 
 void screen_play::play() {
+	if (!mbc.romFile) {
+		emulator.tryScreenChange(1);
+		return;
+	}
+
 	mbcFileUpdate();
 
 	drawPlayBG();
@@ -134,8 +149,8 @@ void screen_play::play() {
 		cpuStep();
 	}
 
-	// make sure menu isn't pressed
-	while (keyDown_fast(48) == true);
+	// make sure pause key (MENU / HOME) isn't still held down
+	while (keyDown_fast(_(48, 69)) == true);
 
 	// save sram
 	saveRAM();

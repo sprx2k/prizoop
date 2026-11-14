@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.h"
 #include "cpu.h"
 #include "mbc.h"
 
@@ -31,7 +32,7 @@ namespace emu_scale {
 }
 
 // Emulation settings
-#define SETTINGS_VERSION 4
+#define SETTINGS_VERSION _(4, 0x104)
 struct emulator_settings {
 	int version;
 	unsigned int faqOffset;		// faq text offset (top 8 bits are name hash, bottom 24 are actual offset)

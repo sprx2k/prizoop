@@ -1,6 +1,7 @@
 
 #include "platform.h"
 #include "screen_rom.h"
+#include "exam_mode.h"
 
 typedef struct
 {
@@ -69,6 +70,16 @@ void screen_rom::select() {
 	if (wasLoaded) {
 		Bfile_CloseFile_OS(mbc.romFile);
 		mbc.romFile = 0;
+	}
+
+	if (isStorageLockedOrExamMode()) {
+		files = new foundFile[1];
+		numFiles = 0;
+		ResolveBG(bg_menu);
+		int x = 10;
+		int y = 10;
+		PrintMini(&x, &y, "Disabled in Exam Mode / Storage Locked", 0x42, 0xffffffff, 0, 0, COLOR_RED, COLOR_BLACK, 1, 0);
+		return;
 	}
 
 	discoverFiles();

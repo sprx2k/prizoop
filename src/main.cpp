@@ -2,8 +2,9 @@
 
 #include "emulator.h"
 #include "rom.h"
-#include "ptune2_simple\Ptune2_direct.h"
+#include "ptune2_simple/Ptune2_direct.h"
 #include "debug.h"
+#include "exam_mode.h"
 
 #include "calctype/fonts/arial_small/arial_small.c"		// For Menus
 #include "calctype/fonts/consolas_intl/consolas_intl.c"	// for FAQS
@@ -29,6 +30,11 @@ int main(void) {
 	Bdisp_EnableColor(1);
 	EnableStatusArea(3);
 
+	if (isStorageLockedOrExamMode()) {
+		showExamModeBlockedScreen(true);
+		return 0;
+	}
+
 	// allocate cached mbc banks on the stack
 	ALLOCATE_CACHED_BANKS();
 
@@ -42,6 +48,7 @@ int main(void) {
 
 	emulator.startUp();
 	emulator.run();
+	shutdown();
 
 	return 0;
 }

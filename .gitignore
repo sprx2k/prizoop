@@ -37,3 +37,5 @@ debug.txt
 /comp-gb/comp-gb.vcxproj.user
 /proj/Release/comp-gb.pdb
 /Release/comp-gb.log
+/build*/
+__pycache__/
