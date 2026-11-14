@@ -78,12 +78,12 @@ Prizoop is built via CMake and **fxSDK** (`FXCG50.cmake`) with `gint`/`fxlibc` i
 
 ```bash
 # fx-CG100 / Graph Math+
-cmake -B build-cw -S . -DCMAKE_TOOLCHAIN_FILE=$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake -DPLATFORM=cw
-cmake --build build-cw -j
+fxsdk build-cg -c -DPLATFORM=cw
+fxsdk build-cg
 
 # fx-CG50 / Graph 90+E
-cmake -B build-cg -S . -DCMAKE_TOOLCHAIN_FILE=$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake -DPLATFORM=cg
-cmake --build build-cg -j
+fxsdk build-cg -c -DPLATFORM=cg
+fxsdk build-cg
 ```
 
 See `.github/workflows/build-g3a.yml` for the automated Ubuntu 24.04 + `giteapc` build pipeline.

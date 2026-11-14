@@ -51,13 +51,23 @@ jobs:
           sh-elf-gcc --version
 
       - name: Configure (fx-CG100 / Graph Math+)
-        run: cmake -B build-cw -S . -DCMAKE_TOOLCHAIN_FILE=$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake -DPLATFORM=cw
+        run: |
+          cmake -B build-cw -S . \
+            -DCMAKE_MODULE_PATH="$HOME/.local/lib/cmake/fxsdk" \
+            -DFXSDK_CMAKE_MODULE_PATH="$HOME/.local/lib/cmake/fxsdk" \
+            -DCMAKE_TOOLCHAIN_FILE="$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake" \
+            -DPLATFORM=cw
 
       - name: Build (fx-CG100 / Graph Math+)
         run: cmake --build build-cw -j2
 
       - name: Configure (fx-CG50 / Graph 90+E)
-        run: cmake -B build-cg -S . -DCMAKE_TOOLCHAIN_FILE=$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake -DPLATFORM=cg
+        run: |
+          cmake -B build-cg -S . \
+            -DCMAKE_MODULE_PATH="$HOME/.local/lib/cmake/fxsdk" \
+            -DFXSDK_CMAKE_MODULE_PATH="$HOME/.local/lib/cmake/fxsdk" \
+            -DCMAKE_TOOLCHAIN_FILE="$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake" \
+            -DPLATFORM=cg
 
       - name: Build (fx-CG50 / Graph 90+E)
         run: cmake --build build-cg -j2
