@@ -1,90 +1,95 @@
 ![Options Screen](https://github.com/tswilliamson/prizoop/raw/master/Screens/Options.png?raw=true)
 
-Prizoop v 1.1
-=============
+Prizoop v1.1 (fx-CG100 / Graph Math+ & fx-CG50)
+================================================
 
-Prizoop is a Game Boy and Game Boy Color emulator for the Casio Prizm series graphing calculator, with intense focus on optimization and decent feature set for the target device. As such, it is not a very accurate emulator but is very fast and compatible. The emulator now supports fx-CG10, fx-CG20, and the new fx-CG50. 
+Prizoop is a Game Boy and Game Boy Color emulator for Casio graphing calculators, focused on high speed on SH7305 hardware. This fork adds full **Casio fx-CG100 / Graph Math+ (`PLATFORM=cw`, MPM)** support alongside **fx-CG50 / fx-CG10 / fx-CG20 (`PLATFORM=cg`)** using **fxSDK**.
 
-It got its name because it started out as a fork of the multiplatform Game Boy emulator, Cinoop, by CTurt. It has since undergone an almost total rewrite and shares some of the cpu code, organization and constructs from Cinoop, but for the most part resembles Cinoop much less than a normal fork.
+For deep technical details on what failed previously and how the fx-CG100 port, LCD driver detection, syscall mapping, and Exam Mode enforcement work, see [docs/CG100_PORT.md](docs/CG100_PORT.md) and [CHANGELOG.md](CHANGELOG.md).
+
+## Supported Calculators & Requirements
+
+- **Casio fx-CG100 / Graph Math+ (`prizoop_cw.g3a`):**
+  - Requires **MPM (Math Plus Mod)** installed on the calculator.
+  - Supports OS **02.00.0202 / 02.00.2202** and **02.10** via `casiowin.yaml` / `libsyscall-cw.a` dual-version syscall dispatch.
+  - Supports both older **R61524 (`0x202`)** and newer **(`0x2C`)** LCD controllers automatically via `0xDA` ID register detection.
+- **Casio fx-CG50 / Graph 90+E (`prizoop_cg.g3a`):**
+  - Built with `-DPLATFORM=cg`, preserving native fx-CG50 key mappings and `libsyscall-cg.a`.
 
 ## Install
 
-Copy the prizoop.g3a file to your Casio Prizm calculator's root path when linked via USB. Gameboy and Gameboy Color roms (.gb and .gbc) also should go inside of the root directory. The filenames for these files should be simple and less than 12 characters, such as MyGame.gbc. 
+1. Download the `.g3a` for your calculator from the **GitHub Actions** (`Build G3A` workflow) artifact:
+   - `prizoop-cg100-g3a` -> `prizoop_cw.g3a` for **fx-CG100 / Graph Math+**
+   - `prizoop-cg50-g3a` -> `prizoop_cg.g3a` for **fx-CG50 / Graph 90+E**
+2. Connect your calculator to your PC via USB (select USB Flash / Mass Storage mode).
+3. Copy `prizoop_cw.g3a` (and `mpm.bin` if not already installed) to the calculator's **root directory** (`\\fls0\`).
+4. Copy your Game Boy (`.gb`), Game Boy Color (`.gbc`), or compressed (`.gbz`) ROM files into the **root directory** (`\\fls0\`). Keep filenames short and simple (8.3 / under 12 characters, e.g., `Tetris.gb`, `LinksA.gbc`).
+5. Safely eject the calculator before unplugging USB.
+6. On **fx-CG100 / Graph Math+**, go to **HOME** and press **TOOLS** to open the MPM add-in menu, then select **Prizoop**.
 
-Additionally, Windows users can compress a .gb and .gbc ROM file into a smaller .gbz file that is also compatible, though the game will be slightly slower when starting a new level, etc due to needing to decompress data on the fly. Some games such as Ghosts and Goblins will compress to ~10% of their original size, enabling you to have a much larger library on your calculator. To compress a ROM file, simply run comp-gb.exe and select the ROM to compress. The tool will automatically create a .gbz file in the same folder.
+> **Storage Note:** The fx-CG100 exposes ~4.5 MB of USB storage memory by default. Large GBC ROMs (1–4 MB) fit more easily if compressed to `.gbz` with `comp-gb/comp-gb.exe` on Windows.
 
-## Usage
+## Exam Mode Restriction
 
-### Menu
+Prizoop enforces Examination Mode restrictions at two layers:
 
-In the menu system use the arrow keys and SHIFT to select.
+1. **System / Bootloader Lock (Primary):**
+   - On **fx-CG100 / Graph Math+**, MPM checks Examination Mode and disables the `HOME -> TOOLS` add-in launcher (`mpm.bin` will not run while Exam Mode is active).
+   - On **fx-CG50**, CASIOWIN blocks third-party `.g3a` add-ins during Examination Mode.
+2. **In-App Locked-Storage Guard (Defense-in-Depth):**
+   - Because Casio OS restricts `\\fls0\` storage memory access in Examination Mode, Prizoop verifies storage accessibility at startup (`src/exam_mode.cpp`), in the ROM browser (`src/screen_rom.cpp`), and before ROM initialization (`src/screen_play.cpp`).
+   - If storage memory is locked/restricted, Prizoop displays an `"ACCESS DISABLED (EXAM MODE)"` notice and blocks browsing or launching ROMs.
 
-- F1: Select ROM
-- F2: Settings (most are self explanatory)
-- F5: FAQ Viewer
-- F6: Play ROM (it will first show diagnostic information)
+## Controls
 
-When inside a game, the MENU key will exit to the settings screen, and pressing MENU again will take you back to the calculator OS.
+### Menu Navigation (fx-CG100 / Graph Math+)
 
-A single save state is supported per ROM, which can be loaded/saved using the remappable keys mentioned in the Controls section.
+- **D-Pad (Arrows):** Navigate ROMs, settings, and FAQ
+- **SHIFT** or **EXE / OK:** Select / Launch ROM / Toggle option
+- **SETTINGS:** Tab 1 — Select ROM
+- **HOME:** Tab 2 — Settings
+- **>| (END):** Tab 5 — FAQ Viewer
+- **PGUP:** Tab 6 — Play / Load ROM
+- **BACK:** Exit Prizoop and return to OS / MPM
 
-### In Game
+*(On fx-CG50, the top function keys `F1`–`F6` correspond to Tabs 1–6 and `MENU` exits.)*
 
-You can configure your own keys in the Settings menu, these are the default I found to work well:
+### In-Game Default Controls (fx-CG100 / Graph Math+)
 
-- Dpad : Dpad
-- A: SHIFT
-- B: OPTN
-- Select: F5
-- Start: F6
-- Save State : X (multiply), which is the alpha 's' key for save
-- Load State : -> (store), which is the alpha 'l' key for load
-- Increase Volume/Distortion : + 
-- Decrease Volume/Distortion : -
+All buttons can be remapped in **Settings -> Map Keys** (press **HOME** during mapping to cancel; on fx-CG50 press **MENU**):
 
-Some games, such as the Mario titles, play much better with a reversed control scheme, where you bind left and right to Shift/Option, and A and B to Cos/Tan. This is because the Prizm directional pad is a little flaky and on the opposite side as a traditional game controller.
+| Game Boy Button | fx-CG100 / Graph Math+ Key | fx-CG50 Key |
+|---|---|---|
+| D-Pad | Arrow Keys | Arrow Keys |
+| A | `SHIFT` | `SHIFT` |
+| B | `ALPHA` | `OPTN` |
+| Select | `>\|` (END) | `F5` |
+| Start | `PGUP` | `F6` |
+| Save State | `×` (Multiply) | `×` (Alpha `S`) |
+| Load State | `)` | `→` (Alpha `L`) |
+| Pause / Options | `HOME` | `MENU` |
+| Volume + / - | `+` / `-` | `+` / `-` |
 
-### FAQ Viewer
+> **Note:** Hardware overclock (`Ptune2`) is automatically disabled on fx-CG100 and fx-CG50 (`Ptune2` timings are specific to fx-CG10/CG20). Do not force CG20 overclock registers on CG100.
 
-![FAQ View](https://github.com/tswilliamson/prizoop/raw/master/Screens/FAQ.png?raw=true)
+## Building from Source (fxSDK)
 
-If you have a text file (.txt) with the same base filename as any of your ROM's, this text file can now be viewed inside of Prizoop for easy reference. The FAQ is viewed with a calctype font (see my other repo) that is a clear and easy to read text at just 5 pixels wide per character. To read the FAQ, just use the new FAQ option from within the menu. Prizoop will save your most recently viewed FAQ position to make it simple to go back and forth with the game and between sessions.
+Prizoop is built via CMake and **fxSDK** (`FXCG50.cmake`) with `gint`/`fxlibc` installed via `giteapc`:
 
-Many game FAQs are built to wrap short lines (around 80 characters) and these will display with no trouble on the calculator. Many international characters are supported, but make sure your .txt file is saved in ANSI text format. UTF formats are not supported.
+```bash
+# fx-CG100 / Graph Math+
+fxsdk build-cg -c -DPLATFORM=cw
+fxsdk build-cg
 
-FAQ viewing controls:
-- Up / Down: Scroll up and down
-- Left / Right : Shift left and right (useful for badly wrapping FAQ files)
-- F2: Game settings
-- F6: Return to Game
+# fx-CG50 / Graph 90+E
+fxsdk build-cg -c -DPLATFORM=cg
+fxsdk build-cg
+```
 
-## Support
+See `.github/workflows/build-g3a.yml` for the automated Ubuntu 24.04 + `giteapc` build pipeline.
 
-![Game Banner](https://github.com/tswilliamson/prizoop/raw/master/Screens/GameBanner.png?raw=true)
+## Credits & Acknowledgements
 
-The emulator now plays over 95% of the games I have been able to test smoothly at this point. Some games where timing accuracy is very important suffer, specifically racing games. Road Rash and F1 Race are playable but have some visual issues, and F1 Pole Position does not play at all. Pokemon Rouge (the French Pokemon Red) now officially works.
-
-The emulator now supports Real Time Clock games such as Pokemon Gold and Silver, utilizing the real time clock on the Prizm.
-
-### Sound
-
-The emulator has full support for sound, though it is somewhat limited due to the 1-bit nature of the Prizm serial port. If you have a 2.5 mm to 3.5 mm headphone adapter, you can enjoy low-lag sound with a decent frequency range in one earphone (left or right, depending on the adaptor). Some adaptors seem to have different voltage output, so you may get some distortion or unusually high volume. Volume and distortion can be simultaneously adjusted with the + and - keys.
-
-## Building
-
-My other repository, PrizmSDK, is required to build Prizoop from source. Put your Prizoop clone in the SDK projects directory.
-
-To build on a Windows machine, I recommed using the project files using Visual Studio Community Edition, where I have NMAKE set up nicely. For other systems please refer to your Prizm SDK documentation on how to compile projects. Refer to the configuration options in make-DeviceRelease.bat.
-
-If you do use Visual Studio, a project is included that uses a Windows Simulator I wrote that wraps Prizm OS functions so that the code and emulator can easily be tested and iterated on within Visual Studio. See the prizmsim.cpp/h code for details on its usage.
-
-## Special Thanks
-
-BGB was a huge part of bug fixing and obtaining decent ROM compatibility. It is a Gameboy emulator with great debugging and memory visualization tools:
-http://bgb.bircd.org/
-
-A huge special thanks obviously goes to CTurt, who's simple explanations and easy to read source got this project rolling by making it seem much less scary. See the original Cinoop source code here:
-https://github.com/CTurt/Cinoop
-<!--stackedit_data:
-eyJoaXN0b3J5IjpbMTY3NDc2NDM3OF19
--->
+- Original **Prizoop** by `tswilliamson`, based on **Cinoop** by `CTurt`.
+- **fxSDK / gint / fxlibc / MPM** by `Lephenixnoir` and the Planète Casio community.
+- **fx-CG100 / ClassWiz syscall mapping (`casiowin.yaml`) and LCD `0xDA` DMA detection** adapted from community fxSDK porting work (`bju12290/prizoop-50` and `0v0katai/fxcraft`).

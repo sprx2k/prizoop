@@ -40,6 +40,8 @@ void(*drawFramebuffer)(void) = 0;
 #define LCD_BASE	0xB4000000
 #define SYNCO() __asm__ volatile("SYNCO\n\t":::"memory");
 
+static volatile unsigned short* const DISPLAY = (volatile unsigned short*)LCD_BASE;
+
 // DMA0 operation register
 #define DMA0_DMAOR	(volatile unsigned short*)0xFE008060
 #define DMA0_CHCR_0	(volatile unsigned*)0xFE00802C
@@ -53,6 +55,15 @@ static int curScanBuffer = 0;
 
 // current line within the scanline buffer
 static int curScan = 0;
+
+static void SelectVRAMDataRegister(void) {
+	Bdisp_DDRegisterSelect(0xDA);
+	if (*DISPLAY == 0x32 || *DISPLAY == 0x52) {
+		Bdisp_DDRegisterSelect(0x2C);
+	} else {
+		Bdisp_DDRegisterSelect(LCD_GRAM);
+	}
+}
 
 void DmaWaitNext(void) {
 	// enable burst mode now that we are waiting
@@ -95,7 +106,7 @@ inline void flushScanBuffer(int startX, int endX, int startY, int endY, int scan
 
 	Bdisp_WriteDDRegister3_bit7(1);
 	Bdisp_DefineDMARange(startX, endX, startY, endY);
-	Bdisp_DDRegisterSelect(LCD_GRAM);
+	SelectVRAMDataRegister();
 
 	DmaDrawStrip(&scanGroup[curScanBuffer * scanBufferSize], scanBufferSize);
 	curScanBuffer = 1 - curScanBuffer;

@@ -2,6 +2,8 @@ name: Build G3A
 
 on:
   push:            # runs on any push to any branch
+  pull_request:
+    branches: [ master, main ]
   workflow_dispatch:  # lets you run it manually from Actions tab
 
 jobs:
@@ -14,19 +16,31 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential cmake git python3 pkg-config \
+            build-essential cmake git python3 python3-pil pkg-config \
             libpng-dev libusb-1.0-0-dev libsdl2-dev libudisks2-dev \
-            libglib2.0-dev libgirepository1.0-dev zlib1g-dev \
+            libglib2.0-dev libgirepository1.0-dev libncurses-dev zlib1g-dev \
             gcc-sh-elf binutils-sh-elf libnewlib-sh-elf-dev \
             libmpfr-dev libmpc-dev libppl-dev
 
+      - name: Cache fxSDK & gint toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.local
+          key: fxsdk-gint-${{ runner.os }}-v1
+
       - name: Get giteapc
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: git clone --depth 1 https://git.planet-casio.com/Lephenixnoir/giteapc /tmp/giteapc
 
-      - name: Install fxsdk & gint
+      - name: Install fxsdk & gint toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
-          python3 /tmp/giteapc/giteapc.py install Lephenixnoir/fxsdk
-          python3 /tmp/giteapc/giteapc.py install Lephenixnoir/gint
+          export PATH="$HOME/.local/bin:$PATH"
+          yes | python3 /tmp/giteapc/giteapc.py install Lephenixnoir/fxsdk
+          yes | python3 /tmp/giteapc/giteapc.py install Lephenixnoir/OpenLibm
+          yes | python3 /tmp/giteapc/giteapc.py install Vhex-Kernel-Core/fxlibc
+          yes | python3 /tmp/giteapc/giteapc.py install Lephenixnoir/gint
 
       - name: Add fxsdk to PATH for later steps
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -36,19 +50,45 @@ jobs:
           fxsdk --version
           sh-elf-gcc --version
 
-      - name: Configure (FX-CG50)
-        run: cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake
+      - name: Configure (fx-CG100 / Graph Math+)
+        run: |
+          cmake -B build-cw -S . \
+            -DCMAKE_MODULE_PATH="$HOME/.local/lib/cmake/fxsdk" \
+            -DFXSDK_CMAKE_MODULE_PATH="$HOME/.local/lib/cmake/fxsdk" \
+            -DCMAKE_TOOLCHAIN_FILE="$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake" \
+            -DPLATFORM=cw
 
-      - name: Build
-        run: cmake --build build -j2
+      - name: Build (fx-CG100 / Graph Math+)
+        run: cmake --build build-cw -j2
 
-      - name: Locate g3a
-        id: locate
-        run: echo "file=$(find build -name '*.g3a' -print -quit)" >> "$GITHUB_OUTPUT"
+      - name: Configure (fx-CG50 / Graph 90+E)
+        run: |
+          cmake -B build-cg -S . \
+            -DCMAKE_MODULE_PATH="$HOME/.local/lib/cmake/fxsdk" \
+            -DFXSDK_CMAKE_MODULE_PATH="$HOME/.local/lib/cmake/fxsdk" \
+            -DCMAKE_TOOLCHAIN_FILE="$HOME/.local/lib/cmake/fxsdk/FXCG50.cmake" \
+            -DPLATFORM=cg
 
-      - name: Upload .g3a
-        if: steps.locate.outputs.file != ''
+      - name: Build (fx-CG50 / Graph 90+E)
+        run: cmake --build build-cg -j2
+
+      - name: Verify built .g3a artifacts
+        run: |
+          mkdir -p dist
+          CW_G3A="$(find . -maxdepth 3 -name 'prizoop_cw.g3a' -print -quit)"
+          CG_G3A="$(find . -maxdepth 3 -name 'prizoop_cg.g3a' -print -quit)"
+          test -n "$CW_G3A" && cp "$CW_G3A" dist/prizoop_cw.g3a
+          test -n "$CG_G3A" && cp "$CG_G3A" dist/prizoop_cg.g3a
+          ls -lh dist/
+
+      - name: Upload fx-CG100 / Graph Math+ .g3a
         uses: actions/upload-artifact@v4
         with:
-          name: g3a
-          path: ${{ steps.locate.outputs.file }}
+          name: prizoop-cg100-g3a
+          path: dist/prizoop_cw.g3a
+
+      - name: Upload fx-CG50 .g3a
+        uses: actions/upload-artifact@v4
+        with:
+          name: prizoop-cg50-g3a
+          path: dist/prizoop_cg.g3a
