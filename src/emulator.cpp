@@ -201,12 +201,16 @@ void emulator_type::getPalette(unsigned char paletteNum, colorpalette_type& into
 // Save states
 
 void fillSaveStatePath(unsigned short* pFile) {
-	// replace .gb with .prz
+	// replace ROM extension with .prz
 	char filepath[256];
 	strcpy(filepath, "\\\\fls0\\");
-	strcat(filepath, emulator.settings.selectedRom);
-	filepath[strlen(filepath) - 2 - (cgb.isCGB ? 1 : 0)] = 0;
-	strcat(filepath, "prz");
+	strncat(filepath, emulator.settings.selectedRom, sizeof(filepath) - strlen(filepath) - 5);
+	char* dot = strrchr(filepath, '.');
+	if (dot && (size_t)(dot - filepath) + 5 <= sizeof(filepath)) {
+		strcpy(dot, ".prz");
+	} else {
+		strcat(filepath, ".prz");
+	}
 
 	Bfile_StrToName_ncpy(pFile, (const char*)filepath, strlen(filepath) + 2);
 }
@@ -446,5 +450,5 @@ bool emulator_type::loadState() {
 
 	screens[curScreen]->postStateChange();
 
-	return false;
+	return true;
 }

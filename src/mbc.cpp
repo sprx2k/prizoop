@@ -157,11 +157,14 @@ void mbcFileUpdate() {
 static int mbcReadFile(unsigned char* into, unsigned int size, unsigned int offset) {
 	// use block addresses to do direct copy
 	int sizeLeft = size;
-	int block = offset / 4096;
-	int blockAddr = offset % 4096;
+	unsigned int block = offset / 4096;
+	unsigned int blockAddr = offset % 4096;
 	while (sizeLeft) {
-		int blockRem = min(4096 - blockAddr, sizeLeft);
-		memcpy(into, BlockAddresses[block]+blockAddr, blockRem);
+		if (block >= 1024 || !BlockAddresses[block]) {
+			return size - sizeLeft;
+		}
+		int blockRem = min(4096 - (int)blockAddr, sizeLeft);
+		memcpy(into, BlockAddresses[block] + blockAddr, blockRem);
 		into += blockRem;
 		sizeLeft -= blockRem;
 
@@ -559,7 +562,12 @@ bool setupMBCType(mbcType type, unsigned char romSizeByte, unsigned char ramSize
 	}
 
 	// support if we support the ram bank type
-	return supportedRAM(mbc.ramType);
+	if (!supportedRAM(mbc.ramType)) {
+		mbc.batteryBacked = 0;
+		return false;
+	}
+
+	return true;
 }
 
 // called when a write attempt occurs for rom
@@ -717,7 +725,7 @@ static unsigned int curRAMHash(int size) {
 			ret = ((ret << 5) + (ret >> 27)) ^ sram[i];
 		}
 	} else {
-		for (int b = 0; b <= size / 0x1000; b++) {
+		for (int b = 0; b < size / 0x1000; b++) {
 			for (int i = 0; i < 0x1000; i++) {
 				ret = ((ret << 5) + (ret >> 27)) ^ cachedBanks[b]->bank[i];
 			}
@@ -847,7 +855,7 @@ void mbcOnStateLoad() {
 		specialMap[i] |= 0x10;
 	}
 
-	if (getRAMSize() <= 8 * 1024) {
+	if (getRAMSize() > 0) {
 		sramHash = curRAMHash(getRAMSize());
 	}
 }

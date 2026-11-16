@@ -20,7 +20,7 @@ void cgbInitROM() {
 	// set up additional work RAM banks
 	for (int i = 0; i < 6; i++) {
 		cgb_wram[i] = new cgbworkram_type;
-		memset(&cgb_wram[i]->data, 0, sizeof(0x1000));
+		memset(cgb_wram[i]->data, 0, sizeof(cgb_wram[i]->data));
 	}
 
 	// various IO memory defaults

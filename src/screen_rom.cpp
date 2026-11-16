@@ -21,7 +21,9 @@ static void FindFiles(const char* path, foundFile* toArray, int& numFound) {
 	ret = Bfile_FindFirst((const char*)filter, &handle, (char*)found, &info);
 
 	while (ret == 0 && numFound < 64) {
-		Bfile_NameToStr_ncpy(toArray[numFound++].path, found, 32);
+		Bfile_NameToStr_ncpy(toArray[numFound].path, found, 32);
+		toArray[numFound].path[31] = '\0';
+		numFound++;
 		ret = Bfile_FindNext(handle, (char*)found, (char*)&info);
 	};
 

@@ -126,7 +126,7 @@ void cpuReset(void) {
 }
 
 inline void undefined(void) {
-	cpu.registers.pc--;
+	cpu.registers.pc = (cpu.registers.pc - 1) & 0xFFFF;
 	
 	unsigned char instruction = readByte(cpu.registers.pc);
 
@@ -321,7 +321,7 @@ inline void rla(void) {
 
 // 0x18
 inline void jr_n(unsigned char operand) {
-	cpu.registers.pc += (signed char)operand;
+	cpu.registers.pc = (cpu.registers.pc + (signed char)operand) & 0xFFFF;
 }
 
 // 0x19
@@ -360,7 +360,7 @@ inline void rra(void) {
 inline void jr_nz_n(unsigned char operand) {
 	if(FLAGS_ISZERO) cpu.clocks += 4;
 	else {
-		cpu.registers.pc += (signed char)operand;
+		cpu.registers.pc = (cpu.registers.pc + (signed char)operand) & 0xFFFF;
 		cpu.clocks += 8;
 	}
 }
@@ -369,7 +369,7 @@ inline void jr_nz_n(unsigned char operand) {
 inline void ld_hl_nn(unsigned short operand) { cpu.registers.hl = operand; }
 
 // 0x22
-inline void ldi_hlp_a(void) { writeByte(cpu.registers.hl++, cpu.registers.a); }
+inline void ldi_hlp_a(void) { writeByte(cpu.registers.hl++, cpu.registers.a); cpu.registers.hl &= 0xFFFF; }
 
 // 0x23
 inline void inc_hl(void) { cpu.registers.hl++; cpu.registers.hl &= 0xFFFF; }
@@ -424,7 +424,7 @@ void daa(void) {
 // 0x28
 inline void jr_z_n(unsigned char operand) {
 	if(FLAGS_ISZERO) {
-		cpu.registers.pc += (signed char)operand;
+		cpu.registers.pc = (cpu.registers.pc + (signed char)operand) & 0xFFFF;
 		cpu.clocks += 8;
 	}
 	else cpu.clocks += 4;
@@ -434,7 +434,7 @@ inline void jr_z_n(unsigned char operand) {
 inline void add_hl_hl(void) { add2(&cpu.registers.hl, cpu.registers.hl); }
 
 // 0x2a
-inline void ldi_a_hlp(void) { cpu.registers.a = readByte(cpu.registers.hl++); cpu.registers.de &= 0xFFFF; }
+inline void ldi_a_hlp(void) { cpu.registers.a = readByte(cpu.registers.hl++); cpu.registers.hl &= 0xFFFF; }
 
 // 0x2b
 inline void dec_hl(void) { cpu.registers.hl--; cpu.registers.hl &= 0xFFFF; }
@@ -452,10 +452,10 @@ inline void ld_l_n(unsigned char operand) { cpu.registers.l = operand; }
 inline void cpl(void) { cpu.registers.a = ~cpu.registers.a; FLAGS_SET(FLAGS_N | FLAGS_HC); }
 
 // 0x30
-inline void jr_nc_n(char operand) {
+inline void jr_nc_n(signed char operand) {
 	if(FLAGS_ISCARRY) cpu.clocks += 8;
 	else {
-		cpu.registers.pc += operand;
+		cpu.registers.pc = (cpu.registers.pc + operand) & 0xFFFF;
 		cpu.clocks += 12;
 	}
 }
@@ -464,10 +464,10 @@ inline void jr_nc_n(char operand) {
 inline void ld_sp_nn(unsigned short operand) { cpu.registers.sp = operand; }
 
 // 0x32
-inline void ldd_hlp_a(void) { writeByte(cpu.registers.hl, cpu.registers.a); cpu.registers.hl--; }
+inline void ldd_hlp_a(void) { writeByte(cpu.registers.hl, cpu.registers.a); cpu.registers.hl--; cpu.registers.hl &= 0xFFFF; }
 
 // 0x33
-inline void inc_sp(void) { cpu.registers.sp++; }
+inline void inc_sp(void) { cpu.registers.sp++; cpu.registers.sp &= 0xFFFF; }
 
 // 0x34
 inline void inc_hlp(void) { writeByte(cpu.registers.hl, inc(readByte(cpu.registers.hl))); }
@@ -489,9 +489,9 @@ inline void scf(void) {
 }
 
 // 0x38
-inline void jr_c_n(char operand) {
+inline void jr_c_n(signed char operand) {
 	if(FLAGS_ISCARRY) {
-		cpu.registers.pc += operand;
+		cpu.registers.pc = (cpu.registers.pc + operand) & 0xFFFF;
 		cpu.clocks += 8;
 	}
 	else cpu.clocks += 4;
@@ -504,7 +504,7 @@ inline void add_hl_sp(void) { add2(&cpu.registers.hl, cpu.registers.sp); }
 inline void ldd_a_hlp(void) { cpu.registers.a = readByte(cpu.registers.hl--); cpu.registers.hl &= 0xFFFF; }
 
 // 0x3b
-inline void dec_sp(void) { cpu.registers.sp--; }
+inline void dec_sp(void) { cpu.registers.sp--; cpu.registers.sp &= 0xFFFF; }
 
 // 0x3c
 inline void inc_a(void) { cpu.registers.a = inc(cpu.registers.a); }
@@ -1002,9 +1002,9 @@ static const char* regNames[8] = {
 #endif
 
 #define INSTRUCTION_0(name,numticks,func,id,code)   case id: DebugInstruction(name); func(); cpu.clocks += (numticks - 4); code break;
-#define INSTRUCTION_1(name,numticks,func,id,code)   case id: DebugInstruction(name, pc[1]); { cpu.registers.pc += 1; func(pc[1]); cpu.clocks += (numticks - 4); code } break;
-#define INSTRUCTION_1S(name,numticks,func,id,code)  case id: DebugInstruction(name, pc[1]); { cpu.registers.pc += 1; func((signed char) pc[1]); cpu.clocks += (numticks - 4); code } break;
-#define INSTRUCTION_2(name,numticks,func,id,code)   case id: DebugInstruction(name, pc[1] | (pc[2] << 8)); { cpu.registers.pc += 2; func(pc[1] | (pc[2] << 8)); cpu.clocks += (numticks - 4); code } break;
+#define INSTRUCTION_1(name,numticks,func,id,code)   case id: DebugInstruction(name, pc[1]); { cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF; func(pc[1]); cpu.clocks += (numticks - 4); code } break;
+#define INSTRUCTION_1S(name,numticks,func,id,code)  case id: DebugInstruction(name, pc[1]); { cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF; func((signed char) pc[1]); cpu.clocks += (numticks - 4); code } break;
+#define INSTRUCTION_2(name,numticks,func,id,code)   case id: DebugInstruction(name, pc[1] | (pc[2] << 8)); { cpu.registers.pc = (cpu.registers.pc + 2) & 0xFFFF; func(pc[1] | (pc[2] << 8)); cpu.clocks += (numticks - 4); code } break;
 #define INSTRUCTION_L(name,numticks,func,id,code)   case id: 
 #define INSTRUCTION_E(name,numticks,func,id,code)   case id: DebugInstructionMapped(name, regNames[pc[0] & 7]); func(*regMap[pc[0] & 7]); cpu.clocks += (numticks - 4); code break;
 #define CB_INSTRUCTION(name,numticks,func,id,code)  case id: DebugInstruction(name); func(); cpu.clocks += (numticks - 4); code break;
@@ -1042,7 +1042,8 @@ void cpuStep() {
 
 				for (unsigned int i = 0; i < numInstr; i++) {
 					DebugPC(cpu.registers.pc);
-					unsigned char* pc = getInstrByte(cpu.registers.pc++);
+					unsigned char* pc = getInstrByte(cpu.registers.pc);
+					cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF;
 					// perform inlined instruction op
 					switch (pc[0]) {
 						// main instruction set
@@ -1076,7 +1077,7 @@ void cpuStep() {
 }
 
 void cb_n(int operand) {
-	cpu.registers.pc += 1;
+	cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF;
 	switch (operand) {
 #include "cb_instructions.inl"
 	}

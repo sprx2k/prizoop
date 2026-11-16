@@ -2,6 +2,7 @@
 
 #include "platform.h"
 #include "screen_faq.h"
+#include "exam_mode.h"
 #include "calctype/fonts/consolas_intl/consolas_intl.h"
 
 void screen_faq::setup() {
@@ -23,6 +24,11 @@ void screen_faq::select() {
 	ResolveBG(bg_faq);
 
 	textOffset = 0;
+
+	if (isStorageLockedOrExamMode()) {
+		Print(10, 10, "Access denied: Exam Mode / Storage locked.", false);
+		return;
+	}
 
 	if (emulator.settings.selectedRom[0]) {
 		unsigned char faqHash = hashString(emulator.settings.selectedRom);
@@ -60,8 +66,13 @@ void screen_faq::loadFAQ() {
 	char filename[64];
 	unsigned short wFile[64];
 	strcpy(filename, "\\\\fls0\\");
-	strcat(filename, emulator.settings.selectedRom);
-	strcpy(strrchr(filename, '.'), ".txt");
+	strncat(filename, emulator.settings.selectedRom, sizeof(filename) - strlen(filename) - 5);
+	char* dot = strrchr(filename, '.');
+	if (dot && (size_t)(dot - filename) + 5 <= sizeof(filename)) {
+		strcpy(dot, ".txt");
+	} else {
+		strcat(filename, ".txt");
+	}
 
 	Bfile_StrToName_ncpy(wFile, filename, 64);
 	faqHandle = Bfile_OpenFile_OS(wFile, READ, 0);
@@ -91,14 +102,17 @@ void screen_faq::draw() {
 		bool skipLine = false;
 		if (x) {
 			for (int c = 0; c < x; c++) {
-				if (textBuffer[curTextPos + c] == '\n') {
+				if (curTextPos + c >= textSize || textBuffer[curTextPos + c] == '\n') {
 					skipLine = true;
+					break;
 				}
 			}
 		}
-		if (!skipLine) {
-			strncpy(bufToDraw, textBuffer + curTextPos + x, lineSize);
-			for (int c = 0; c < lineSize; c++) {
+		if (!skipLine && curTextPos + x < textSize) {
+			int copyLen = min(lineSize, textSize - (curTextPos + x));
+			memcpy(bufToDraw, textBuffer + curTextPos + x, copyLen);
+			bufToDraw[copyLen] = '\0';
+			for (int c = 0; c < copyLen; c++) {
 				if (bufToDraw[c] == '\n') {
 					bufToDraw[c] = 0;
 					break;

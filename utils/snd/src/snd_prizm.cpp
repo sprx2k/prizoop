@@ -163,6 +163,9 @@ void sndUpdate() {
 		if (toAdd > 1)
 		{
 			unsigned char writeBuffer[256];
+			if (toAdd > (int)sizeof(writeBuffer)) {
+				toAdd = (int)sizeof(writeBuffer);
+			}
 			int samplesRemaining = toAdd / 2;
 			unsigned char* curWrite = writeBuffer;
 			int samplesWritten = samplesRemaining;
@@ -180,7 +183,7 @@ void sndUpdate() {
 					sampleNum += samplesRemaining;
 					samplesRemaining = 0;
 				}
-			} while (samplesRemaining);
+			}
 
 			Serial_Write(writeBuffer, samplesWritten * 2);
 		}

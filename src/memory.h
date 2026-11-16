@@ -48,12 +48,12 @@ inline unsigned char readByte(unsigned int address) {
 }
 
 inline unsigned short readShort(unsigned int address) {
-	return readByte(address) | (readByte(address + 1) << 8);
+	return readByte(address & 0xFFFF) | (readByte((address + 1) & 0xFFFF) << 8);
 }
 
 inline unsigned int readShortFromStack(void) {
 	unsigned short value = readShort(cpu.registers.sp);
-	cpu.registers.sp += 2;
+	cpu.registers.sp = (cpu.registers.sp + 2) & 0xFFFF;
 	return value;
 }
 
@@ -87,11 +87,11 @@ inline void writeByte(unsigned int address, unsigned char value) {
 }
 
 inline void writeShort(unsigned int address, unsigned short value) {
-	writeByte(address, (unsigned char)(value & 0x00ff));
-	writeByte(address + 1, (unsigned char)(value >> 8));
+	writeByte(address & 0xFFFF, (unsigned char)(value & 0x00ff));
+	writeByte((address + 1) & 0xFFFF, (unsigned char)(value >> 8));
 }
 
 inline void writeShortToStack(unsigned short value) {
-	cpu.registers.sp -= 2;
+	cpu.registers.sp = (cpu.registers.sp - 2) & 0xFFFF;
 	writeShort(cpu.registers.sp, value);
 }

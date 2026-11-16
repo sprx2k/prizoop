@@ -20,17 +20,25 @@ unsigned char loadROM(const char *filename) {
 	
 	unsigned char header[0x180];
 
-	int extension = strrchr(filename, '.') - filename;
+	const char* dot = strrchr(filename, '.');
+	size_t baseLen = dot ? (size_t)(dot - filename) : strlen(filename);
+	if (strlen(filename) + 8 >= sizeof(curRomFile) || baseLen + 12 >= sizeof(curSaveFile)) {
+		printf("Filename too long!\n");
+		return 0;
+	}
 
 	strcpy(curRomFile, "\\\\fls0\\");
 	strcat(curRomFile, filename);
 
-	bool isCompressed = strcmp(filename + extension, ".gbz") == 0 || strcmp(filename + extension, ".GBZ") == 0 || strcmp(filename + extension, ".Gbz") == 0;
+	bool isCompressed = dot &&
+		(dot[1] == 'g' || dot[1] == 'G') &&
+		(dot[2] == 'b' || dot[2] == 'B') &&
+		(dot[3] == 'z' || dot[3] == 'Z') &&
+		dot[4] == '\0';
 
 	strcpy(curSaveFile, "\\\\fls0\\");
-	strcat(curSaveFile, filename);
-	curSaveFile[extension+8] = 0;
-	strcat(curSaveFile, "SAV");
+	strncat(curSaveFile, filename, baseLen);
+	strcat(curSaveFile, ".SAV");
 
 	int hFile;
 	unsigned short pFile[256];
@@ -157,6 +165,7 @@ void unloadROM(void) {
 	}
 
 	saveRAM();
+	mbc.batteryBacked = 0;
 
 	// free up vram
 	if (vram) {
