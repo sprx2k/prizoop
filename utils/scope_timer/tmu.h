@@ -4,7 +4,7 @@
 // Bit 0 - Enable TMU 0
 // Bit 1 - Enable TMU 1
 // Bit 2 - Enable TMU 2
-#define REG_TMU_TSTR	(*((unsigned char*) 0xA4490004))
+#define REG_TMU_TSTR	(*((volatile unsigned char*) 0xA4490004))
 
 /*
    TCOR : Constant register
@@ -25,14 +25,14 @@
 				  011 - Clock rate / 256
 				  100 - Clock rate / 1024
  */
-#define REG_TMU_TCOR_0	(*((unsigned int*) 0xA4490008))
-#define REG_TMU_TCNT_0	(*((unsigned int*) 0xA449000C))
-#define REG_TMU_TCR_0	(*((unsigned short*) 0xA4490010))
+#define REG_TMU_TCOR_0	(*((volatile unsigned int*) 0xA4490008))
+#define REG_TMU_TCNT_0	(*((volatile unsigned int*) 0xA449000C))
+#define REG_TMU_TCR_0	(*((volatile unsigned short*) 0xA4490010))
 
-#define REG_TMU_TCOR_1	(*((unsigned int*) 0xA4490014))
-#define REG_TMU_TCNT_1	(*((unsigned int*) 0xA4490018))
-#define REG_TMU_TCR_1	(*((unsigned short*) 0xA449001C))
+#define REG_TMU_TCOR_1	(*((volatile unsigned int*) 0xA4490014))
+#define REG_TMU_TCNT_1	(*((volatile unsigned int*) 0xA4490018))
+#define REG_TMU_TCR_1	(*((volatile unsigned short*) 0xA449001C))
 
-#define REG_TMU_TCOR_2	(*((unsigned int*) 0xA4490020))
-#define REG_TMU_TCNT_2	(*((unsigned int*) 0xA4490024))
-#define REG_TMU_TCR_2	(*((unsigned short*) 0xA4490028))
+#define REG_TMU_TCOR_2	(*((volatile unsigned int*) 0xA4490020))
+#define REG_TMU_TCNT_2	(*((volatile unsigned int*) 0xA4490024))
+#define REG_TMU_TCR_2	(*((volatile unsigned short*) 0xA4490028))

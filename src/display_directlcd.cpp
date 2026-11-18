@@ -108,7 +108,7 @@ inline void flushScanBuffer(int startX, int endX, int startY, int endY, int scan
 	Bdisp_DefineDMARange(startX, endX, startY, endY);
 	SelectVRAMDataRegister();
 
-	DmaDrawStrip(&scanGroup[curScanBuffer * scanBufferSize], scanBufferSize);
+	DmaDrawStrip(&scanGroup[curScanBuffer * (scanBufferSize >> 1)], scanBufferSize);
 	curScanBuffer = 1 - curScanBuffer;
 
 	curScan = 0;
@@ -124,7 +124,7 @@ void resolveScanline_NONE() {
 	if (curScan == bufferLines) {
 		// we've rendered as much as we can buffer, resolve to pixels and DMA it:
 		unsigned char* curLineBuffer = ((unsigned char*)0xE5017000);
-		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer*scanBufferSize];
+		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer * (scanBufferSize >> 1)];
 		for (int i = 0; i < bufferLines; i++) {
 			lineBuffer = curLineBuffer + curLineBuffer[0];
 			DirectScanline16(scanline);
@@ -162,7 +162,7 @@ void resolveScanline_LO_200(void) {
 	if (curScan == bufferLines) {
 		// we've rendered as much as we can buffer, resolve to pixels and DMA it:
 		unsigned char* curLineBuffer = ((unsigned char*)0xE5017000);
-		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer*scanBufferSize];
+		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer * (scanBufferSize >> 1)];
 		for (int i = 0; i < bufferLines; i += 2) {
 			prevLineBuffer = curLineBuffer + curLineBuffer[0];
 			lineBuffer = curLineBuffer + lineBufferSize + curLineBuffer[lineBufferSize];
@@ -196,7 +196,7 @@ void resolveScanline_HI_200(void) {
 	if (curScan == bufferLines) {
 		// we've rendered as much as we can buffer, resolve to pixels and DMA it:
 		unsigned char* curLineBuffer = ((unsigned char*)0xE5017000);
-		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer*scanBufferSize];
+		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer * (scanBufferSize >> 1)];
 		for (int i = 0; i < bufferLines; i += 2) {
 			prevLineBuffer = curLineBuffer + curLineBuffer[0];
 			lineBuffer = curLineBuffer + lineBufferSize + curLineBuffer[lineBufferSize];
@@ -229,7 +229,7 @@ void resolveScanline_LO_150(void) {
 	curScan++;
 	if (curScan == bufferLines) {
 		unsigned char* curLineBuffer = ((unsigned char*)0xE5017000);
-		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer*scanBufferSize];
+		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer * (scanBufferSize >> 1)];
 		for (int i = 0; i < bufferLines; i += 2) {
 			prevLineBuffer = curLineBuffer + curLineBuffer[0];
 			lineBuffer = curLineBuffer + lineBufferSize + curLineBuffer[lineBufferSize];
@@ -263,7 +263,7 @@ void resolveScanline_HI_150(void) {
 	if (curScan == bufferLines) {
 		// we've rendered as much as we can buffer, resolve to pixels and DMA it:
 		unsigned char* curLineBuffer = ((unsigned char*)0xE5017000);
-		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer*scanBufferSize];
+		unsigned int* scanline = (unsigned int*)&scanGroup[curScanBuffer * (scanBufferSize >> 1)];
 		for (int i = 0; i < bufferLines; i += 2) {
 			prevLineBuffer = curLineBuffer + curLineBuffer[0] + 8;
 			lineBuffer = curLineBuffer + lineBufferSize + curLineBuffer[lineBufferSize] + 8;
@@ -317,7 +317,7 @@ void scanlineBlank(void) {
 
 	TIME_SCOPE();
 
-	memset(lineBuffer, 0, 167);
+	memset(lineBuffer, 0, 168);
 	resolveRenderedLine();
 }
 
@@ -335,6 +335,7 @@ void drawFramebufferMain(void) {
 		// tmu1 needs to be set up
 		REG_TMU_TSTR &= ~(1 << 1);
 
+		counterStart = 0x7FFFFFFF;
 		REG_TMU_TCOR_1 = counterStart;   // max int
 		REG_TMU_TCNT_1 = counterStart;
 		REG_TMU_TCR_1 = counterRegs;    // max division, no interrupt needed
@@ -435,6 +436,9 @@ void drawFramebufferMain(void) {
 
 void SetupDisplayDriver(char withFrameskip) {
 	frameSkip = withFrameskip;
+	skippingFrame = false;
+	curScanBuffer = 0;
+	curScan = 0;
 
 	drawFramebuffer = drawFramebufferMain;
 

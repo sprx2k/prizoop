@@ -105,6 +105,7 @@ extern mbc_bankcache* cachedBanks[NUM_CACHED_BANKS];
 
 // compressed page locations for each rom file page
 extern int* compressedPages;
+extern int numCompressedPages;
 
 // reads the page with the given ROM bank index (in 4k chunks) to the given memory address
 bool mbcReadPage(unsigned int bankIndex, unsigned char* target, bool instructionOverlap);

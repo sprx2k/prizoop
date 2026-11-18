@@ -18,20 +18,26 @@ void updateDiv() {
 
 void updateTimer() {
 	if (cpu.memory.TAC_timerctl & 0x04) {
-		const int bits = bitsToShift[cpu.memory.TAC_timerctl & 3];
-		int curTimer = (cpu.timer >> bits) & 0xFFFF;
-		cpu.timer = cpu.timer + (cpu.clocks - cpu.timerBase);
-		int newTimer = (cpu.timer >> bits) & 0xFFFF;
-		if ((newTimer & 0xFF00) != (curTimer & 0xFF00)) {
+		const unsigned int bits = bitsToShift[cpu.memory.TAC_timerctl & 3];
+		const unsigned int subMask = (1U << bits) - 1U;
+		unsigned int elapsed = cpu.clocks - cpu.timerBase;
+		unsigned int total = cpu.timer + elapsed;
+		unsigned int count = total >> bits;
+		unsigned int subTicks = total & subMask;
+
+		if (count >= 256U) {
 			// overflow occured
 			cpu.memory.IF_intflag |= INTERRUPTS_TIMER;
-			newTimer = cpu.memory.TMA_timermodulo;
+			unsigned int reload = cpu.memory.TMA_timermodulo;
+			unsigned int period = 256U - reload;
+			count = reload + ((count - 256U) % period);
 		}
-		newTimer = newTimer & 0xFF;
-		cpu.memory.TIMA_timerctr = newTimer;
+		cpu.timer = (count << bits) | subTicks;
+		cpu.memory.TIMA_timerctr = (unsigned char)count;
 
 		// determine next interrupt hit for optimizations
-		cpu.timerInterrupt = cpu.clocks + ((0xff - newTimer + 1) << bits) - 4;
+		unsigned int ticksToOverflow = ((256U - count) << bits) - subTicks;
+		cpu.timerInterrupt = cpu.clocks + ticksToOverflow;
 	}
 	else {
 		cpu.timerInterrupt = 0xFFFFFFFF;
@@ -40,15 +46,20 @@ void updateTimer() {
 }
 
 void writeTIMA(unsigned char value) {
-	const int bits = bitsToShift[cpu.memory.TAC_timerctl & 3];
+	const unsigned int bits = bitsToShift[cpu.memory.TAC_timerctl & 3];
+	const unsigned int subMask = (1U << bits) - 1U;
+	unsigned int elapsed = (cpu.memory.TAC_timerctl & 0x04) ? (cpu.clocks - cpu.timerBase) : 0U;
+	unsigned int subTicks = (cpu.timer + elapsed) & subMask;
 	cpu.memory.TIMA_timerctr = value;
-	cpu.timer = (value << bits) | ((cpu.timer & 0xFFFFFFFF) >> (32 - bits));
+	cpu.timer = ((unsigned int)value << bits) | subTicks;
 	cpu.timerBase = cpu.clocks;
-	cpu.memory.TIMA_timerctr = value;
 	updateTimer();
 }
 
 void writeTAC(unsigned char value) {
+	if (cpu.memory.TAC_timerctl & 0x04) {
+		updateTimer();
+	}
 	cpu.memory.TAC_timerctl = value;
 	writeTIMA(cpu.memory.TIMA_timerctr);
 }

@@ -65,7 +65,11 @@ unsigned char loadROM(const char *filename) {
 	}
 
 	// read in the header and print out info
-	Bfile_ReadFile_OS(hFile, header, 0x180, 0);
+	if (Bfile_ReadFile_OS(hFile, header, 0x180, 0) != 0x180) {
+		printf("Failed reading ROM header!\n");
+		Bfile_CloseFile_OS(hFile);
+		return 0;
+	}
 	
 	memset(name, '\0', 17);
 	for(i = 0; i < 16; i++) {
@@ -97,6 +101,7 @@ unsigned char loadROM(const char *filename) {
 
 	if (!setupMBCType(type, romSizeByte, ramSizeByte, hFile)) {
 		printf("Unsupported MBC: %s, (%02x ROM, %02x RAM)\n", getMBCTypeString(type), romSizeByte, ramSizeByte);
+		mbc.batteryBacked = 0;
 		unloadROM();
 		return 0;
 	}
@@ -109,24 +114,56 @@ unsigned char loadROM(const char *filename) {
 		free((void*) compressedPages);
 		compressedPages = NULL;
 	}
+	numCompressedPages = 0;
 
 	// set up compression if in use
 	if (isCompressed) {
 		mbc.compressed = 1;
 
-		unsigned short numPages;
-		Bfile_ReadFile_OS(hFile, &numPages, 2, -1);
+		unsigned short numPages = 0;
+		if (Bfile_ReadFile_OS(hFile, &numPages, 2, -1) != 2) {
+			printf("Failed reading gbz page count!\n");
+			mbc.batteryBacked = 0;
+			unloadROM();
+			return 0;
+		}
 		EndianSwap(numPages);
+
+		if (numPages < 4 || numPages > 1024) {
+			printf("Invalid gbz page count: %d\n", numPages);
+			mbc.batteryBacked = 0;
+			unloadROM();
+			return 0;
+		}
 
 		//  N 2 byte words of compressed page sizes (4098 if left uncompressed)
 		//  N zx7 compressed pages
 		compressedPages = (int*) malloc(sizeof(int) * (numPages + 1));
+		if (!compressedPages) {
+			printf("Out of memory for gbz table!\n");
+			mbc.batteryBacked = 0;
+			unloadROM();
+			return 0;
+		}
+		numCompressedPages = numPages;
 		int curPos = Bfile_TellFile_OS(hFile) + 2 * numPages;
 		compressedPages[0] = curPos;
 		for (int i = 1; i <= numPages; i++) {
-			unsigned short pageSize;
-			Bfile_ReadFile_OS(hFile, &pageSize, 2, -1);
+			unsigned short pageSize = 0;
+			if (Bfile_ReadFile_OS(hFile, &pageSize, 2, -1) != 2) {
+				printf("Failed reading gbz page table!\n");
+				mbc.batteryBacked = 0;
+				unloadROM();
+				return 0;
+			}
 			EndianSwap(pageSize);
+
+			if (pageSize == 0 || pageSize > 4098) {
+				printf("Invalid gbz page size!\n");
+				mbc.batteryBacked = 0;
+				unloadROM();
+				return 0;
+			}
 			
 			curPos += pageSize;
 			compressedPages[i] = curPos;
@@ -139,10 +176,15 @@ unsigned char loadROM(const char *filename) {
 	mbcFileUpdate();
 		
 	// read permanent ROM Area in
-	mbcReadPage(0, &cart[0x0000], false);
-	mbcReadPage(1, &cart[0x1000], false);
-	mbcReadPage(2, &cart[0x2000], false);
-	mbcReadPage(3, &cart[0x3000], false);
+	if (!mbcReadPage(0, &cart[0x0000], false) ||
+		!mbcReadPage(1, &cart[0x1000], false) ||
+		!mbcReadPage(2, &cart[0x2000], false) ||
+		!mbcReadPage(3, &cart[0x3000], false)) {
+		printf("Failed reading ROM pages!\n");
+		mbc.batteryBacked = 0;
+		unloadROM();
+		return 0;
+	}
 
 	if (mbc.batteryBacked) {
 		if (tryLoadSRAM(curSaveFile)) {
@@ -159,13 +201,19 @@ unsigned char loadROM(const char *filename) {
 }
 
 void unloadROM(void) {
-	if (mbc.romFile) {
+	if (mbc.romFile >= 0) {
 		Bfile_CloseFile_OS(mbc.romFile);
-		mbc.romFile = 0;
+		mbc.romFile = -1;
 	}
 
 	saveRAM();
 	mbc.batteryBacked = 0;
+
+	if (compressedPages) {
+		free((void*)compressedPages);
+		compressedPages = NULL;
+	}
+	numCompressedPages = 0;
 
 	// free up vram
 	if (vram) {

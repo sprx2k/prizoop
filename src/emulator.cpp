@@ -15,6 +15,7 @@ emulator_type emulator;
 void emulator_type::startUp() {
 	curScreen = 0;
 	pausePreviewValid = false;
+	mbc.romFile = -1;
 
 	if (!loadSettings()) {
 		defaultSettings();
@@ -47,7 +48,7 @@ void emulator_type::shutDown() {
 
 bool emulator_type::isCGBRomLoaded() {
 	screen_play* play = (screen_play*) screens[2];
-	if (play && play->loadedROM[0] && !strcmp(play->loadedROM, emulator.settings.selectedRom)) {
+	if (mbc.romFile >= 0 && play && play->loadedROM[0] && !strcmp(play->loadedROM, emulator.settings.selectedRom)) {
 		return cgb.isCGB;
 	}
 
@@ -121,6 +122,7 @@ static const char* settingsFile = "Settings";
 
 void emulator_type::defaultSettings() {
 	// default settings
+	memset(&settings, 0, sizeof(settings));
 	settings.version = SETTINGS_VERSION;
 	settings.selectedRom[0] = 0;
 	settings.overclock = false;
@@ -159,6 +161,26 @@ bool emulator_type::loadSettings() {
 		if (!MCSGetData1(0, sizeof(readSettings), &readSettings)) {
 			if (readSettings.version == SETTINGS_VERSION) {
 				memcpy(&emulator.settings, &readSettings, sizeof(emulator_settings));
+				emulator.settings.selectedRom[sizeof(emulator.settings.selectedRom) - 1] = '\0';
+				emulator.settings.overclock = emulator.settings.overclock ? 1 : 0;
+				emulator.settings.useCGBColors = emulator.settings.useCGBColors ? 1 : 0;
+				emulator.settings.clampSpeed = emulator.settings.clampSpeed ? 1 : 0;
+				emulator.settings.sound = emulator.settings.sound ? 1 : 0;
+				if (emulator.settings.scaleMode >= emu_scale::MAX) {
+					emulator.settings.scaleMode = emu_scale::LO_150;
+				}
+				if (emulator.settings.frameSkip < -1 || emulator.settings.frameSkip > 4) {
+					emulator.settings.frameSkip = -1;
+				}
+				if (emulator.settings.bgColorPalette >= numPalettes()) {
+					emulator.settings.bgColorPalette = 0;
+				}
+				if (emulator.settings.obj1ColorPalette >= numPalettes()) {
+					emulator.settings.obj1ColorPalette = 0;
+				}
+				if (emulator.settings.obj2ColorPalette >= numPalettes()) {
+					emulator.settings.obj2ColorPalette = 0;
+				}
 				return true;
 			}
 		}
@@ -194,6 +216,9 @@ unsigned char emulator_type::numPalettes() {
 }
 
 void emulator_type::getPalette(unsigned char paletteNum, colorpalette_type& intoColors) {
+	if (paletteNum >= numPalettes()) {
+		paletteNum = 0;
+	}
 	memcpy(&intoColors, &palettes[paletteNum], sizeof(colorpalette_type));
 }
 
@@ -394,14 +419,18 @@ bool emulator_type::loadState() {
 		cgbSpeedSwitch();
 	}
 
-	// write cpu and mbc state (preserve mbc rom file handle)
+	// write cpu and mbc state (preserve host file handle, compression flag, and CGB hardware mode)
 	int romFile = mbc.romFile;
+	int compressed = mbc.compressed;
+	unsigned char wasCGB = cgb.isCGB;
 	Bfile_ReadFile_OS(hFile, &cpu, sizeof(cpu_type), -1);
 	Bfile_ReadFile_OS(hFile, &mbc, sizeof(mbc_state), -1);
 	mbc.romFile = romFile;
+	mbc.compressed = compressed;
 
-	if (cgb.isCGB) {
+	if (wasCGB) {
 		Bfile_ReadFile_OS(hFile, &cgb, sizeof(cgb_type), -1);
+		cgb.isCGB = wasCGB;
 	}
 
 	CompatSwaps();

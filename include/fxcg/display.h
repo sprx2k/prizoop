@@ -1,6 +1,12 @@
 #ifndef __FXCG_DISPLAY_H
 #define __FXCG_DISPLAY_H
 
+#ifdef __has_include
+#if __has_include("config.h")
+#include "config.h"
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -363,7 +369,11 @@ typedef enum {
 
 inline DeviceType getDeviceType() {
 #if TARGET_PRIZM
+#ifdef PLATFORM
+	return (PLATFORM == cw || (unsigned int)GetVRAMAddress() == 0xAC000000) ? DT_CG50 : DT_CG20;
+#else
 	return (unsigned int)GetVRAMAddress() == 0xAC000000 ? DT_CG50 : DT_CG20;
+#endif
 #else
 	return DT_Winsim;
 #endif

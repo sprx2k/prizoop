@@ -10,7 +10,7 @@ struct keys_type keys;
 #if !TARGET_WINSIM
 // returns true if the key is down, false if up
 bool keyDown_fast(unsigned char keyCode) {
-	static const unsigned short* keyboard_register = (unsigned short*)0xA44B0000;
+	static const volatile unsigned short* const keyboard_register = (volatile unsigned short*)0xA44B0000;
 
 	int row, col, word, bit;
 	row = keyCode % 10;

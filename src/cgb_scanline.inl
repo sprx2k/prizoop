@@ -40,7 +40,18 @@ inline bool RenderCGBScanline_BG() {
 
 				int attr = vram[mapOffset + lineOffset + 0x2000];
 				if (((attr & 0x80) == 0) == priorityBG) {
-					hasPriority = true;
+					if (!priorityBG) {
+						hasPriority = true;
+						int paletteMask = (attr & 0x07) << 4;
+						scanline[0] = paletteMask;
+						scanline[1] = paletteMask;
+						scanline[2] = paletteMask;
+						scanline[3] = paletteMask;
+						scanline[4] = paletteMask;
+						scanline[5] = paletteMask;
+						scanline[6] = paletteMask;
+						scanline[7] = paletteMask;
+					}
 					scanline += 8;
 					continue;
 				}
@@ -111,7 +122,18 @@ inline bool RenderCGBScanline_BG() {
 					if (((attr & 0x80) == 0) == priorityBG) {
 						if (!priorityBG) {
 							hasPriority = true;
+							int paletteMask = (attr & 0x07) << 4;
+							scanline[0] = paletteMask;
+							scanline[1] = paletteMask;
+							scanline[2] = paletteMask;
+							scanline[3] = paletteMask;
+							scanline[4] = paletteMask;
+							scanline[5] = paletteMask;
+							scanline[6] = paletteMask;
+							scanline[7] = paletteMask;
 						}
+						scanline += 8;
+						continue;
 					}
 
 					int tile = vram[mapOffset + lineOffset];

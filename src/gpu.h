@@ -73,7 +73,7 @@ extern unsigned int framecounter;
 extern int windowLineOffset;
 
 // line buffer rendered too during scanline render functions
-const int lineBufferSize = 180;
+const int lineBufferSize = 184;
 extern unsigned char* lineBuffer;
 
 inline void resolveDMGBGPalette() {
@@ -106,5 +106,5 @@ inline unsigned int mix565(unsigned int X, unsigned int Y) {
 
 inline unsigned int mix565_32(unsigned int X, unsigned int Y) {
 	// RGB565 color mix with two simultaneous colors
-	return ((X + Y - ((X ^ Y) & 0x08210821)) >> 1) | ((X & Y & 0x80000000));
+	return (X & Y) + (((X ^ Y) & 0xF7DEF7DE) >> 1);
 }

@@ -30,6 +30,7 @@ unsigned char rtcMap[256] ALIGN(256);
 
 // compressed page locations for each rom file page
 int* compressedPages = NULL;
+int numCompressedPages = 0;
 
 const char* getMBCTypeString(mbcType type) {
 	switch (type) {
@@ -145,7 +146,13 @@ unsigned char ramNibbleCount(ramSizeType type) {
 // support up to a 4 MB ROM 
 static unsigned char* BlockAddresses[1024] = { 0 };
 void mbcFileUpdate() {
-	int numBlocks = (Bfile_GetFileSize_OS(mbc.romFile) + 4095) / 4096; // 16k ROM banks means 4 4k blocks a piece
+	memset(BlockAddresses, 0, sizeof(BlockAddresses));
+	if (mbc.romFile < 0)
+		return;
+	int fileSize = Bfile_GetFileSize_OS(mbc.romFile);
+	if (fileSize < 0)
+		return;
+	int numBlocks = min((fileSize + 4095) / 4096, 1024); // 16k ROM banks means 4 4k blocks a piece
 	for (int i = 0; i < numBlocks; i++) {
 		int ret = Bfile_GetBlockAddress(mbc.romFile, i * 0x1000, &BlockAddresses[i]);
 		if (ret < 0)
@@ -183,23 +190,32 @@ bool mbcReadPage(unsigned int bankIndex, unsigned char* target, bool instrOverla
 	unsigned int overlapBytes = instrOverlap ? 2 : 0;
 
 	if (mbc.compressed) {
+		if (!compressedPages || bankIndex >= (unsigned int)numCompressedPages) {
+			return false;
+		}
 		int compSize = compressedPages[bankIndex + 1] - compressedPages[bankIndex];
-
-		if (compSize == 4098) {
-			mbcReadFile(target, 0x1000 + overlapBytes, compressedPages[bankIndex]);
-		} else {
-			unsigned char compBuffer[4098];
-			mbcReadFile(compBuffer, compSize, compressedPages[bankIndex]);
-			if (instrOverlap) {
-				ZX7Decompress(compBuffer, target, 4098);
-			} else {
-				unsigned char uncompBuffer[4098];
-				ZX7Decompress(compBuffer, uncompBuffer, 4098);
-				memcpy(target, uncompBuffer, 4096);
-			}
+		if (compSize <= 0 || compSize > 4098) {
+			return false;
 		}
 
-		return true;
+		if (compSize == 4098) {
+			return mbcReadFile(target, 0x1000 + overlapBytes, compressedPages[bankIndex]) == (int)(0x1000 + overlapBytes);
+		} else {
+			static unsigned char compBuffer[4098];
+			if (mbcReadFile(compBuffer, compSize, compressedPages[bankIndex]) != compSize) {
+				return false;
+			}
+			if (instrOverlap) {
+				return ZX7Decompress(compBuffer, target, 4098) == 0;
+			} else {
+				static unsigned char uncompBuffer[4098];
+				if (ZX7Decompress(compBuffer, uncompBuffer, 4098) != 0) {
+					return false;
+				}
+				memcpy(target, uncompBuffer, 4096);
+				return true;
+			}
+		}
 	} else {
 		unsigned int read = mbcReadFile(target, 0x1000 + overlapBytes, bankIndex * 0x1000);
 		DebugAssert(read == 0x1000 + overlapBytes);
@@ -237,7 +253,7 @@ mbc_bankcache* cacheBank(unsigned int index) {
 	if (!mbcReadPage(index, cachedBanks[minSlot]->bank,  index != unsigned(mbc.numRomBanks * 4 - 1))) {
 		// attempt to escape
 		keys.exit = true;
-		return cachedBanks[0];
+		return cachedBanks[firstRomCache];
 	} else {
 		cachedBankIndex[minSlot] = index;
 		lastCacheRequestIndex[minSlot] = cacheIndex;
@@ -248,8 +264,15 @@ mbc_bankcache* cacheBank(unsigned int index) {
 
 // total number of rom banks calculation (16k per bank)
 unsigned short numSwitchableBanksFromType(unsigned char romSizeByte) {
-	unsigned int numTotalBanks = 2 << romSizeByte;
-	return numTotalBanks;
+	if (romSizeByte <= 7) {
+		return 2 << romSizeByte;
+	}
+	switch (romSizeByte) {
+		case 0x52: return 72;
+		case 0x53: return 80;
+		case 0x54: return 96;
+		default: return 0;
+	}
 }
 
 // selects the given rom bank
@@ -283,20 +306,28 @@ unsigned char mbcRead(unsigned short address) {
 // selects the given ram bank
 void selectRamBank(unsigned char bankNum, bool force = false) {
 	if ((bankNum != mbc.ramBank || force) && bankNum < mbc.numRamBanks) {
-		// map memory to our usurped rom cache area
-		for (int i = 0; i < 16; i++) {
-			memoryMap[0xa0 + i] = &cachedBanks[bankNum * 2]->bank[i << 8];
-		}
-		for (int i = 0; i < 16; i++) {
-			memoryMap[0xb0 + i] = &cachedBanks[bankNum * 2+1]->bank[i << 8];
-		}
 		mbc.ramBank = bankNum;
+		if (mbc.sramEnabled && mbc.numRamBanks > 1) {
+			// map memory to our usurped rom cache area
+			for (int i = 0; i < 16; i++) {
+				memoryMap[0xa0 + i] = &cachedBanks[bankNum * 2]->bank[i << 8];
+			}
+			for (int i = 0; i < 16; i++) {
+				memoryMap[0xb0 + i] = &cachedBanks[bankNum * 2+1]->bank[i << 8];
+			}
+		}
 	}
 }
+
+void rtcSelectReg(unsigned char reg);
 
 // enable sram by updating memory map
 void enableSRAM() {
 	mbc.sramEnabled = 1;
+	if (mbcIsRTC() && rtc.rtcReg >= 0x08 && rtc.rtcReg <= 0x0C) {
+		rtcSelectReg(rtc.rtcReg);
+		return;
+	}
 	if (mbc.numRamBanks <= 1) {
 		int nibbleCount = ramNibbleCount(mbc.ramType);
 		for (int i = 0; i < nibbleCount; i++) {
@@ -491,6 +522,10 @@ void rtcSelectReg(unsigned char reg) {
 	rtc.rtcReg = reg;
 
 	rtc.rtcValue = rtcGetLatched(reg);
+
+	if (!mbc.sramEnabled) {
+		return;
+	}
 	
 	// update rtcmap and point memory to it
 	for (int i = 0; i < 256; i++) {
@@ -504,9 +539,10 @@ void rtcSelectReg(unsigned char reg) {
 bool setupMBCType(mbcType type, unsigned char romSizeByte, unsigned char ramSizeByte, int fileID) {
 	memset(&mbc, 0, sizeof(mbc));
 	memset(&rtc, 0, sizeof(rtc));
-	memset(cachedBankIndex, 0, sizeof(cachedBankIndex));
+	memset(cachedBankIndex, 0xFF, sizeof(cachedBankIndex));
 	memset(lastCacheRequestIndex, 0, sizeof(lastCacheRequestIndex));
 	cacheIndex = 0;
+	firstRomCache = 0;
 
 	mbc.romFile = fileID;
 	mbc.type = type;
@@ -526,6 +562,10 @@ bool setupMBCType(mbcType type, unsigned char romSizeByte, unsigned char ramSize
 		case ROM_MBC2:
 			mbc.ramType = RAM_MBC2;
 			mbc.numRomBanks = numSwitchableBanksFromType(romSizeByte);
+			if (mbc.numRomBanks < 2) {
+				mbc.batteryBacked = 0;
+				return false;
+			}
 			selectRomBank(1);
 			break;
 		// support for MBC 1/3/5
@@ -546,6 +586,10 @@ bool setupMBCType(mbcType type, unsigned char romSizeByte, unsigned char ramSize
 		case ROM_MBC5:
 		case ROM_MBC5_RUMBLE:
 			mbc.numRomBanks = numSwitchableBanksFromType(romSizeByte);
+			if (mbc.numRomBanks < 2) {
+				mbc.batteryBacked = 0;
+				return false;
+			}
 			selectRomBank(1);
 			break;
 		default:
@@ -670,9 +714,13 @@ void mbcWrite(unsigned short address, unsigned char value) {
 			}
 			else if (upperNibble <= 0x05) {
 				rtcCheckDirty();
+				bool wasRTC = rtc.rtcReg != 0;
 				rtc.rtcReg = 0;
 
 				if (value < 0x08 || !mbcIsRTC()) {
+					if (mbc.sramEnabled && wasRTC) {
+						enableSRAM();
+					}
 					selectRamBank(value);
 				} else {
 					rtcSelectReg(value);
@@ -755,7 +803,7 @@ bool tryLoadSRAM(const char* filepath) {
 		}
 
 		if (sramSize <= 8192) {
-			if (Bfile_ReadFile_OS(hFile, sram, sramSize, 0) == sramSize) {
+			if (sramSize == 0 || Bfile_ReadFile_OS(hFile, sram, sramSize, 0) == sramSize) {
 				sramHash = curRAMHash(sramSize);
 
 				// read rtc is we need it
@@ -823,7 +871,9 @@ void trySaveSRAM(const char* filepath) {
 		}
 
 		if (sramSize <= 8192) {
-			Bfile_WriteFile_OS(hFile, sram, sramSize);
+			if (sramSize > 0) {
+				Bfile_WriteFile_OS(hFile, sram, sramSize);
+			}
 		} else {
 			// write each bank
 			for (unsigned char i = 0; i < mbc.numRamBanks * 2; i++) {

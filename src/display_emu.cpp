@@ -102,7 +102,8 @@ void renderEmu() {
 void renderBlankEmu() {
 	TIME_SCOPE();
 
-	memset(lineBuffer, 0, sizeof(lineBuffer));
+	lineBuffer = useLineBuffer;
+	memset(useLineBuffer, 0, lineBufferSize);
 	resolveLine();
 }
 

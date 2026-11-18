@@ -23,10 +23,15 @@ void reset_printf() {
 
 void ScreenPrint(char* buffer) {
 	int x = 5;
-	bool newline = buffer[strlen(buffer) - 1] == '\n';
-	if (newline) buffer[strlen(buffer) - 1] = 0;
+	size_t len = strlen(buffer);
+	if (len > 0 && buffer[len - 1] == '\n') {
+		buffer[len - 1] = 0;
+	}
+	if (printY + (int)arial_small.height > LCD_HEIGHT_PX) {
+		printY = 0;
+	}
 	CalcType_Draw(&arial_small, buffer, x, printY + 2, COLOR_WHITE, 0, 0);
-	printY = (printY + arial_small.height) % 224;
+	printY += arial_small.height;
 }
 
 #if DEBUG

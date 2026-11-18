@@ -81,6 +81,12 @@ void screen_faq::loadFAQ() {
 	}
 
 	faqSize = Bfile_GetFileSize_OS(faqHandle);
+	if (faqSize <= 0) {
+		Bfile_CloseFile_OS(faqHandle);
+		faqHandle = -1;
+		faqSize = 0;
+		return;
+	}
 
 	if (textOffset > faqSize || textOffset < 0) {
 		textOffset = 0;
@@ -139,12 +145,25 @@ void screen_faq::draw() {
 void screen_faq::readText(int bufferPos) {
 	textSize = min(4096, faqSize - bufferPos);
 	textOffset = bufferPos;
+	if (textSize <= 0) {
+		textSize = 0;
+		return;
+	}
 
 	if (textBuffer == 0) {
 		textBuffer = (char*) malloc(4096);
+		if (!textBuffer) {
+			textSize = 0;
+			return;
+		}
 	}
 
-	Bfile_ReadFile_OS(faqHandle, textBuffer, textSize, bufferPos);
+	int bytesRead = Bfile_ReadFile_OS(faqHandle, textBuffer, textSize, bufferPos);
+	if (bytesRead < 0) {
+		textSize = 0;
+	} else if (bytesRead < textSize) {
+		textSize = bytesRead;
+	}
 }
 
 void screen_faq::handleDown() {
@@ -155,7 +174,7 @@ void screen_faq::handleDown() {
 	x = 0;
 
 	// go to next line (twice)
-	for (int i = 0; i < 2; i++) {
+	for (int i = 0; i < 2 && readOffset < textSize; i++) {
 		do {
 			readOffset++;
 		} while (readOffset < textSize && textBuffer[readOffset-1] != '\n');

@@ -249,7 +249,7 @@ void Ptune2_SaveBackup() {
 }
 
 int Ptune2_GetPLLFreq() {
-	return (CPG.FRQCRA.LONG >> 24) + 1;
+	return ((CPG.FRQCRA.LONG >> 24) & 0x3F) + 1;
 }
 
 int Ptune2_GetIFCDiv() {

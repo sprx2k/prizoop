@@ -71,7 +71,11 @@ void sndChannelInit(int channelNum) {
 			cpu.memory.NR52_soundmast |= 0x08;							// set not out of length
 			snd.ch4EnvCounter = 0;										// reset envelope counter
 			snd.ch4Volume = ((cpu.memory.NR42_snd4env & 0xF0) >> 4);	// use initial volume
-			snd.ch4LFSR = cpu.clocks >> 4;
+			{
+				unsigned int seed = (cpu.clocks >> 4) & 0x7FFF;
+				if ((seed & 0x7F) == 0) seed |= 0x7F;
+				snd.ch4LFSR = (int)seed;
+			}
 			break;
 	}
 }
@@ -242,7 +246,7 @@ void sndFrame(int* buffer, int buffSize) {
 					masterCtl &= ~0x04;
 				}
 				cpu.memory.NR31_snd3len = length;
-			} else if ((cpu.memory.NR31_snd3len & 0x3f) == 0) {
+			} else if (cpu.memory.NR31_snd3len == 0) {
 				masterCtl &= ~0x04;
 			}
 		} else {
@@ -266,13 +270,13 @@ void sndFrame(int* buffer, int buffSize) {
 			// fill our sound buffer
 			int j = sndIter;
 			int last = ((j * invFreqFactor) >> 8);
-			if (cpu.memory.NR43_snd4cnt & 0x80) {
+			if (cpu.memory.NR43_snd4cnt & 0x08) {
 				// 7 bit shift
 				for (int i = 0; i < subSize; j++, i++) {
 					int cur = ((j * invFreqFactor) >> 8);
 					if (last != cur) {
 						int xorBit = ((snd.ch4LFSR & 0x02) >> 1) ^ (snd.ch4LFSR & 0x01);
-						snd.ch4LFSR = ((snd.ch4LFSR >> 1) && 0x7F7F) | (xorBit << 15) | (xorBit << 7);
+						snd.ch4LFSR = ((snd.ch4LFSR >> 1) & 0x7F7F) | (xorBit << 15) | (xorBit << 7);
 						last = cur;
 					}
 					buffer[i] += ((snd.ch4LFSR & 0xF) * vol);
@@ -458,7 +462,7 @@ void sndInactiveFrame() {
 	if ((!ch3UseLength || (masterCtl & 0x04)) && (cpu.memory.NR30_snd3enable & 0x80)) {	// not using or not out of length yet, AND enabled
 		// if length is in use, "decrement" it until sound is done
 		if (ch3UseLength) {
-			int length = cpu.memory.NR31_snd3len & 0x3f;
+			int length = cpu.memory.NR31_snd3len;
 			length += 4;
 			if (length >= 256) {
 				// length finished!
@@ -467,7 +471,7 @@ void sndInactiveFrame() {
 			}
 			cpu.memory.NR31_snd3len = length;
 		}
-		else if ((cpu.memory.NR31_snd3len & 0x3f) == 0) {
+		else if (cpu.memory.NR31_snd3len == 0) {
 			masterCtl &= ~0x04;
 		}
 	}

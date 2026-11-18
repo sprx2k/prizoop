@@ -16,9 +16,7 @@ unsigned int CalcType_DefaultPitch() {
 #define BLUE_PART(x) (x & 0x001F)
 
 void CalcType_DrawGlyph(CalcTypeCharData* glyph, int x, int y, unsigned short color, unsigned char* vram, unsigned int pitch) {
-	unsigned short* drawTo = ((unsigned short*)vram) + x + y * pitch;
 	unsigned char* data = glyph->data;
-	int drawIncrement = pitch - glyph->width;
 
 	// in order for my fast interpolation to work, the inverse of the mask value
 	// must be the bit inverse as well to prevent color overlap
@@ -55,13 +53,23 @@ void CalcType_DrawGlyph(CalcTypeCharData* glyph, int x, int y, unsigned short co
 	};
 
 	for (int gy = 0; gy < glyph->height; gy++) {
-		for (int gx = 0; gx < glyph->width; gx++, drawTo++, data++) {
+		int py = y + gy;
+		if (py < 0 || py >= LCD_HEIGHT_PX) {
+			data += glyph->width;
+			continue;
+		}
+		unsigned short* row = ((unsigned short*)vram) + py * pitch;
+		for (int gx = 0; gx < glyph->width; gx++, data++) {
+			int px = x + gx;
+			if (px < 0 || px >= (int)pitch) {
+				continue;
+			}
 			// glyph data is packed 3:4:1
-			int screen = *drawTo;
+			int screen = row[px];
 			int fontData = data[0];
 			int invFontData = ~fontData;
 
-			*drawTo =
+			row[px] =
 				// mask in draw color
 				(color & redMask[(fontData & 0xE0) >> 5]) |
 				(color & greenMask[(fontData & 0x1C) >> 2]) |
@@ -71,6 +79,5 @@ void CalcType_DrawGlyph(CalcTypeCharData* glyph, int x, int y, unsigned short co
 				(screen & greenMask[(invFontData & 0x1C) >> 2]) |
 				(screen & blueMask[invFontData & 0x03]);
 		}
-		drawTo += drawIncrement;
 	}
 }

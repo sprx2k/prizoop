@@ -135,6 +135,7 @@ void screen_settings::drawOptions() {
 			unsigned short colors[] = {
 				COLOR_WHITE, COLOR_WHITE, COLOR_ORANGE, COLOR_YELLOW, COLOR_ORANGE
 			};
+			if (opt >= emu_scale::MAX) opt = emu_scale::LO_150;
 			Print(180, y, modes[opt], selected, !options[i].disabled ? colors[opt] : COLOR_DARKGRAY);
 		}
 	}
@@ -238,6 +239,9 @@ void screen_settings::handleDown() {
 }
 
 void screen_settings::handleSelect() {
+	if (options[curOption].disabled) {
+		return;
+	}
 	switch (options[curOption].type) {
 		case 0:
 		{

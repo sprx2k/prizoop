@@ -35,10 +35,13 @@ inline void RenderDMGScanline() {
 				scanline += 8;
 				lineOffset = (lineOffset + 1) & 0x1F;
 			}
+		} else {
+			lineBuffer[0] = 0;
+			memset(&lineBuffer[8], 0, 160);
 		}
 
 		// draw window
-		if (cpu.memory.LCDC_ctl & LCDC_WINDOWENABLE)
+		if ((cpu.memory.LCDC_ctl & (LCDC_BGENABLE | LCDC_WINDOWENABLE)) == (LCDC_BGENABLE | LCDC_WINDOWENABLE))
 		{
 			int wx = cpu.memory.WX_windowx;
 			int y = curLine - cpu.memory.WY_windowy + windowLineOffset;

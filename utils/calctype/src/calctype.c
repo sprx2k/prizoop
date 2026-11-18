@@ -10,14 +10,15 @@ extern void CalcType_DrawGlyph(CalcTypeCharData* glyph, int x, int y, unsigned s
 unsigned int CalcType_Width(const CalcTypeFont* font, const char* text) {
 	unsigned int subPixelWidth = 0;
 	while (*text) {
-		if (*text <= 32) {
-			if (*text == 32) {
+		unsigned char ch = (unsigned char)*text;
+		if (ch <= 32) {
+			if (ch == 32) {
 				subPixelWidth += font->space;
-			} else if (*text == '\n') {
+			} else if (ch == '\n') {
 				// currently bad for multiline draws
 			}
 		} else {
-			unsigned short dataOffset = font->charOffset[((int) *text) - 32];
+			unsigned short dataOffset = font->charOffset[ch - 32];
 			if (dataOffset != 0xFFFF) {
 				subPixelWidth += ((CalcTypeCharData*)(font->charData + dataOffset))->xAdvance;
 			}
@@ -44,16 +45,17 @@ void CalcType_Draw(const CalcTypeFont* font, const char* text, int x, int y, uns
 	int maxX = pitch * 3;
 
 	while (*text && subX < maxX) {
-		if (*text <= 32) {
-			if (*text == 32) {
+		unsigned char ch = (unsigned char)*text;
+		if (ch <= 32) {
+			if (ch == 32) {
 				subX += font->space;
 			}
-			else if (*text == '\n') {
+			else if (ch == '\n') {
 				subX = startX;
 				y += font->height;
 			}
 		} else {
-			unsigned short dataOffset = font->charOffset[(*text) - 32];
+			unsigned short dataOffset = font->charOffset[ch - 32];
 			if (dataOffset != 0xFFFF) {
 				CalcTypeCharData* glyph = (CalcTypeCharData*)(font->charData + dataOffset);
 				CalcType_DrawGlyph(glyph, (subX + glyph->xOffset) / 3, y + glyph->yOffset, color, vram, pitch);

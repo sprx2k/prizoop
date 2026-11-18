@@ -13,7 +13,7 @@ typedef struct
 
 static void FindFiles(const char* path, foundFile* toArray, int& numFound) {
 	unsigned short filter[0x100], found[0x100];
-	int ret, handle;
+	int ret, handle = -1;
 	file_type_t info; // See Bfile_FindFirst for the definition of this struct
 
 	Bfile_StrToName_ncpy(filter, path, 0x50); // Overkill
@@ -27,7 +27,9 @@ static void FindFiles(const char* path, foundFile* toArray, int& numFound) {
 		ret = Bfile_FindNext(handle, (char*)found, (char*)&info);
 	};
 
-	Bfile_FindClose(handle);
+	if (handle >= 0) {
+		Bfile_FindClose(handle);
+	}
 }
 
 void screen_rom::discoverFiles() {
@@ -68,10 +70,10 @@ void screen_rom::setup() {
 void screen_rom::select() {
 	// file discovery doesn't work well when rom file is currently active, so we close it
 	loadedFile = -1;
-	bool wasLoaded = mbc.romFile != 0;
+	bool wasLoaded = mbc.romFile >= 0;
 	if (wasLoaded) {
 		Bfile_CloseFile_OS(mbc.romFile);
-		mbc.romFile = 0;
+		mbc.romFile = -1;
 	}
 
 	if (isStorageLockedOrExamMode()) {
@@ -118,7 +120,7 @@ void screen_rom::deselect() {
 			char romFile[64];
 			unsigned short pFile[256];
 			strcpy(romFile, "\\\\fls0\\");
-			strcat(romFile, files[selectedFile].path);
+			strncat(romFile, files[selectedFile].path, sizeof(romFile) - strlen(romFile) - 1);
 			Bfile_StrToName_ncpy(pFile, (const char*) romFile, strlen(romFile) + 2);
 			mbc.romFile = Bfile_OpenFile_OS(pFile, READ, 0);
 		}

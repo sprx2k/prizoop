@@ -55,6 +55,7 @@ void cgbInitROM() {
 }
 
 void cgbSelectWRAM(int ramBank, bool force) {
+	ramBank &= 7;
 	DebugAssert(ramBank >= 0 && ramBank <= 7);
 
 	if (ramBank == 0) {
@@ -83,6 +84,7 @@ void cgbSelectWRAM(int ramBank, bool force) {
 }
 
 void cgbSelectVRAM(int ramBank, bool force) {
+	ramBank &= 1;
 	DebugAssert(ramBank == 0 || ramBank == 1);
 
 	if (ramBank != cgb.selectedVRAM || force) {
@@ -173,6 +175,10 @@ void cgbDMAOp(unsigned char value) {
 }
 
 void cgbHBlankDMA() {
+	if (!cgb.hblankDmaActive || !cgb.dmaLeft) {
+		cgb.hblankDmaActive = false;
+		return;
+	}
 	cgbDmaCopyBits();
 	cpu.memory.HDMA5_cgbstat--;
 

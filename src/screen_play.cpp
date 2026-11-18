@@ -19,7 +19,7 @@ void screen_play::setup() {
 void screen_play::select() {
 	// was ROM already loaded? we may need to switch
 	if (loadedROM[0]) {
-		if (strcmp(loadedROM, emulator.settings.selectedRom)) {
+		if (mbc.romFile < 0 || strcmp(loadedROM, emulator.settings.selectedRom)) {
 			unloadROM();
 		} else {
 			// still playing the same game
@@ -36,7 +36,7 @@ void screen_play::deselect() {
 }
 
 void screen_play::handleSelect() {
-	if (mbc.romFile) {
+	if (mbc.romFile >= 0) {
 		play();
 	}
 }
@@ -82,7 +82,7 @@ void screen_play::postStateChange() {
 bool bSoundEnabled = false;
 
 void screen_play::play() {
-	if (!mbc.romFile) {
+	if (mbc.romFile < 0) {
 		emulator.tryScreenChange(1);
 		return;
 	}
@@ -99,7 +99,7 @@ void screen_play::play() {
 	}
 
 	// Apply settings
-	bool doOverclock = Ptune2_GetSetting() == PT2_DEFAULT;
+	bool doOverclock = getDeviceType() == DT_CG20 && Ptune2_GetSetting() == PT2_DEFAULT;
 	if (doOverclock) {
 		if (emulator.settings.overclock) {
 			// clock up to double unless not scaling/sound/CGB

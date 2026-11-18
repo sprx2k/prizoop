@@ -630,7 +630,7 @@ inline void sbc(unsigned char value) {
 		(((result & 0xff) == 0) << FLAGS_Z_BIT) |														// ZERO
 		FLAGS_N |																						// NEGATIVE
 		(((value & 0x0f) + (FLAGS_ISCARRY ? 1 : 0) > (cpu.registers.a & 0x0f)) << FLAGS_HC_BIT) |		// HALF-CARRY
-		((result & 0x100) >> (8-FLAGS_C_BIT));															// CARRY
+		((result < 0) << FLAGS_C_BIT);																	// CARRY
 
 	cpu.registers.a = (unsigned char)(result & 0xff);
 
@@ -1022,19 +1022,23 @@ void cpuStep() {
 		for (int b = 0; b < BATCHES; b++) {
 			if (cpu.stopped || cpu.halted) {
 				// just advance the clock til something happens
-				unsigned int numClocks = max(cpu.gpuTick - cpu.clocks, 4);
+				unsigned int gpuDelta = (cpu.gpuTick > cpu.clocks) ? (cpu.gpuTick - cpu.clocks) : 0;
+				unsigned int numClocks = max(gpuDelta, 4U);
 
 				if (cpu.memory.TAC_timerctl & 0x04) {
-					numClocks = min(cpu.timerInterrupt - cpu.clocks, numClocks);
+					unsigned int timerDelta = (cpu.timerInterrupt > cpu.clocks) ? (cpu.timerInterrupt - cpu.clocks) : 1;
+					numClocks = min(timerDelta, numClocks);
 				}
 
 				cpu.clocks += numClocks;
 			} else {
 				// 8 clocks per instruction is about the average from empirical testing
-				unsigned int numInstr = min(max(cpu.gpuTick - cpu.clocks, (MIN_CPU_BATCH * 8)) / 8, MAX_CPU_BATCH);
+				unsigned int gpuDelta = (cpu.gpuTick > cpu.clocks) ? (cpu.gpuTick - cpu.clocks) : 0;
+				unsigned int numInstr = min(max(gpuDelta, (unsigned int)(MIN_CPU_BATCH * 8)) / 8, (unsigned int)MAX_CPU_BATCH);
 
 				if (cpu.memory.TAC_timerctl & 0x04) {
-					numInstr = min(max(cpu.timerInterrupt - cpu.clocks, (MIN_CPU_BATCH * 8)) / 8, numInstr);
+					unsigned int timerDelta = (cpu.timerInterrupt > cpu.clocks) ? (cpu.timerInterrupt - cpu.clocks) : 0;
+					numInstr = min(max(timerDelta, (unsigned int)(MIN_CPU_BATCH * 8)) / 8, numInstr);
 				}
 
 				// instructions start with a "base" of 4 clocks a piece
@@ -1067,8 +1071,10 @@ void cpuStep() {
 		// normalize cpu timer when it gets pretty high to prevent math errors
 		const unsigned int normalizeAmt = 1024 * 1024;
 		if (cpu.clocks > normalizeAmt * 2) {
+			updateDiv();
 			updateTimer();
 			cpu.clocks -= normalizeAmt;
+			cpu.divBase -= normalizeAmt;
 			cpu.timerBase -= normalizeAmt;
 			if (cpu.timerInterrupt != 0xFFFFFFFF) cpu.timerInterrupt -= normalizeAmt;
 			cpu.gpuTick -= normalizeAmt;
