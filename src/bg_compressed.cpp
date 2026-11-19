@@ -2217,7 +2217,7 @@ const unsigned char* bg_1x1 = bg_1x1_data;
 const unsigned char* bg_fit = bg_fit_data;
 const unsigned char* bg_faq = bg_faq_data;
 
-const unsigned int bg_menu_size = sizeof(bg_menu_data);
-const unsigned int bg_1x1_size = sizeof(bg_1x1_data);
-const unsigned int bg_fit_size = sizeof(bg_fit_data);
-const unsigned int bg_faq_size = sizeof(bg_faq_data);
+extern const unsigned int bg_menu_size = sizeof(bg_menu_data);
+extern const unsigned int bg_1x1_size = sizeof(bg_1x1_data);
+extern const unsigned int bg_fit_size = sizeof(bg_fit_data);
+extern const unsigned int bg_faq_size = sizeof(bg_faq_data);

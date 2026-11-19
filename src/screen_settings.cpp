@@ -156,13 +156,21 @@ static const char* keyName[] = {
 
 static void drainKeyBuffer() {
 #if !TARGET_WINSIM
-	int col = 0, row = 0;
-	unsigned short keycode = 0;
-	for (int i = 0; i < 32; i++) {
-		if (GetKeyWait_OS(&col, &row, KEYWAIT_HALTOFF_TIMEROFF, 0, 0, &keycode) == KEYREP_NOEVENT) {
-			break;
+	// Wait until all matrix keys are released so no held key triggers an action on return
+	bool anyDown;
+	do {
+		anyDown = false;
+		for (unsigned int c = 25; c <= 79; c++) {
+			if (c % 10 == 0 || c == 34) {
+				continue;
+			}
+			if (keyDown_fast(c)) {
+				anyDown = true;
+				break;
+			}
 		}
-	}
+	} while (anyDown);
+	OS_InnerWait_ms(20);
 #endif
 }
 

@@ -45,3 +45,8 @@ void *fxlibc_hal_realloc(void *ptr, size_t size)
 {
     return sys_realloc(ptr, size);
 }
+
+void kfree(void *ptr)
+{
+    sys_free(ptr);
+}
