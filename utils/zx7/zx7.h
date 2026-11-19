@@ -51,11 +51,11 @@ unsigned int ZX7Compress(const unsigned char *srcData, unsigned int inLength, un
 
 #endif
 
-// Get decompressed size of ZX7Compress'd data
+// Get decompressed size of ZX7Compress'd data (caller must ensure at least 3 bytes)
 unsigned int ZX7GetDecompressedSize(const unsigned char* compressedData);
 
-// Decompress the given data. Returns 0 with no errors
-int ZX7Decompress(const unsigned char* srcData, unsigned char* destData, unsigned int destLength);
+// Decompress the given data with strict input/output bounds. Returns 0 with no errors
+int ZX7Decompress(const unsigned char* srcData, unsigned int srcLength, unsigned char* destData, unsigned int destLength);
 
 #ifdef __cplusplus
 }

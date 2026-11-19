@@ -1,9 +1,9 @@
-
 #include "platform.h"
 #include "keys.h"
 #include "rom.h"
 #include "memory.h"
 #include "cgb.h"
+#include "display.h"
 #include "snd/snd.h"
 #include "cgb_bootstrap.h"
 #include "ptune2_simple/Ptune2_direct.h"
@@ -17,6 +17,17 @@ void screen_play::setup() {
 }
 
 void screen_play::select() {
+	if (isStorageLockedSafe()) {
+		unloadROM();
+		loadedROM[0] = 0;
+		ResolveBG(bg_menu);
+		reset_printf();
+		printf("Access denied: Exam Mode / Storage locked.\n");
+		DrawFrame(0);
+		Bdisp_PutDisp_DD();
+		return;
+	}
+
 	// was ROM already loaded? we may need to switch
 	if (loadedROM[0]) {
 		if (mbc.romFile < 0 || strcmp(loadedROM, emulator.settings.selectedRom)) {
@@ -45,9 +56,11 @@ void screen_play::initRom() {
 	ResolveBG(bg_menu);
 
 	reset_printf();
-	if (isStorageLockedOrExamMode()) {
+	if (isStorageLockedSafe()) {
 		printf("Access denied: Exam Mode / Storage locked.\n");
 		loadedROM[0] = 0;
+		DrawFrame(0);
+		Bdisp_PutDisp_DD();
 		return;
 	}
 
@@ -66,9 +79,9 @@ void screen_play::initRom() {
 
 void screen_play::drawPlayBG() {
 	if (emulator.settings.scaleMode != emu_scale::NONE) {
-		DrawBGEmbedded((unsigned char*)bg_fit);
+		DrawBGEmbedded(bg_fit);
 	} else {
-		DrawBGEmbedded((unsigned char*)bg_1x1);
+		DrawBGEmbedded(bg_1x1);
 	}
 	EnableStatusArea(3);
 	DrawFrame(0);
@@ -82,6 +95,15 @@ void screen_play::postStateChange() {
 bool bSoundEnabled = false;
 
 void screen_play::play() {
+	bSoundEnabled = false;
+
+	if (isStorageLockedSafe()) {
+		unloadROM();
+		loadedROM[0] = 0;
+		emulator.tryScreenChange(1);
+		return;
+	}
+
 	if (mbc.romFile < 0) {
 		emulator.tryScreenChange(1);
 		return;
@@ -91,14 +113,7 @@ void screen_play::play() {
 
 	drawPlayBG();
 
-	bool soundInitted = false;
-	
-	if (emulator.settings.sound) {
-		soundInitted = sndInit();
-		bSoundEnabled = soundInitted;
-	}
-
-	// Apply settings
+	// Apply overclock BEFORE sndInit() so SCIF2 baud divider matches active bus clock
 	bool doOverclock = getDeviceType() == DT_CG20 && Ptune2_GetSetting() == PT2_DEFAULT;
 	if (doOverclock) {
 		if (emulator.settings.overclock) {
@@ -112,6 +127,14 @@ void screen_play::play() {
 			Ptune2_LoadSetting(PT2_NOMEMWAIT);
 		}
 	}
+
+	bool soundInitted = false;
+#if !PRIZOOP_IS_CW
+	if (emulator.settings.sound) {
+		soundInitted = sndInit();
+		bSoundEnabled = soundInitted;
+	}
+#endif
 
 	// look for gameboy color palette override
 	if (!cgb.isCGB) {
@@ -149,20 +172,24 @@ void screen_play::play() {
 		cpuStep();
 	}
 
-	// make sure pause key (MENU / HOME) isn't still held down
-	while (keyDown_fast(_(48, 69)) == true);
+	// flush DMA, restore LCD register 3, and stop TMU1 before OS calls
+	TeardownDisplayDriver();
 
-	// save sram
-	saveRAM();
+	// make sure pause key (MENU / HOME) isn't still held down
+	while (keyDown_fast(PRIZOOP_SEL(48, 69)) == true);
+
+	if (soundInitted) {
+		sndCleanup();
+	}
+	bSoundEnabled = false;
 
 	// undo overclock
 	if (doOverclock) {
 		Ptune2_LoadSetting(PT2_DEFAULT);
 	}
 
-	if (soundInitted) {
-		sndCleanup();
-	}
+	// save sram
+	saveRAM();
 
 #if DEBUG
 	ScopeTimer::Shutdown();

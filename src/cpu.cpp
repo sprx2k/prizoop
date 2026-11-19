@@ -44,12 +44,26 @@ CT_ASSERT(sizeof(cpu.memory) == 0x100);
 // number of batches to do between system checks
 #define BATCHES 1024
 
+static unsigned char imeDelay = 0;
+static unsigned char haltBug = 0;
+
+void cpuClearImeDelay(void) {
+	imeDelay = 0;
+}
+
+void cpuResetRuntimeState(void) {
+	imeDelay = 0;
+	haltBug = 0;
+	windowLineOffset = 0;
+}
+
 void cpuReset(void) {
 	memset(sram, 0, sizeof(sram));
 	memcpy(&cpu.memory, ioReset, sizeof(cpu.memory));
 	memset(oam, 0, sizeof(oam));
 	memset(wram_perm, 0, sizeof(wram_perm));
 	memset(wram_gb, 0, sizeof(wram_gb));
+	memset(&cpu.registers, 0, sizeof(cpu.registers));
 	
 	cpu.registers.a = 0x01;
 	cpu.registers.f = 0xb0;
@@ -62,7 +76,8 @@ void cpuReset(void) {
 	cpu.registers.sp = 0xfffe;
 	cpu.registers.pc = 0x100;
 	
-	cpu.IME = 1;
+	cpu.IME = 0;
+	cpuResetRuntimeState();
 	
 	keys.k1.a = 1;
 	keys.k1.b = 1;
@@ -120,6 +135,7 @@ void cpuReset(void) {
 	// initialize timer
 	cpu.timer = 0;
 	cpu.timerBase = 0;
+	cpu.timerInterrupt = 0xFFFFFFFF;
 
 	// LCD starts out on
 	gpuStep = stepLCDOn_OAM;
@@ -149,8 +165,6 @@ inline void undefined(void) {
 		GetKey(&key);
 	}
 }
-
-void cb_n(unsigned int instruction);
 
 inline unsigned char inc(unsigned char value) {
 	value++;
@@ -279,10 +293,16 @@ inline void rrca(void) {
 
 // 0x10
 void stop(unsigned char operand) {
+	(void)operand;
 	// are we attempting a speed switch?
 	if (cgb.isCGB && (cpu.memory.KEY1_cgbspeed & 1)) {
 		cgbSpeedSwitch();
+		cpu.div = 0;
+		cpu.divBase = cpu.clocks;
+		resetTimerSubTicks();
 	} else {
+		updateDiv();
+		updateTimer();
 		cpu.stopped = 1;
 	}
 }
@@ -453,10 +473,10 @@ inline void cpl(void) { cpu.registers.a = ~cpu.registers.a; FLAGS_SET(FLAGS_N | 
 
 // 0x30
 inline void jr_nc_n(signed char operand) {
-	if(FLAGS_ISCARRY) cpu.clocks += 8;
+	if(FLAGS_ISCARRY) cpu.clocks += 4;
 	else {
 		cpu.registers.pc = (cpu.registers.pc + operand) & 0xFFFF;
-		cpu.clocks += 12;
+		cpu.clocks += 8;
 	}
 }
 
@@ -566,7 +586,15 @@ inline void ld_hlp(unsigned char value) { writeByte(cpu.registers.hl, value); }
 
 // 0x76
 inline void halt(void) {
-	cpu.halted = 1;
+	if (cpu.clocks >= cpu.timerInterrupt) {
+		updateTimer();
+	}
+	if (!cpu.IME && !imeDelay && (cpu.memory.IE_intenable & cpu.memory.IF_intflag & 0x1F)) {
+		// DMG/CGB HALT bug: skip entering HALT and fail to increment PC on the next opcode fetch
+		haltBug = 1;
+	} else {
+		cpu.halted = 1;
+	}
 }
 
 // 0x78-0x7f (except 0x7e)
@@ -833,6 +861,7 @@ inline void ret_c(void) {
 // 0xd9
 inline void ret_i(void) {
 	cpu.IME = 1;
+	imeDelay = 0;
 	cpu.registers.pc = readShortFromStack();
 }
 
@@ -933,7 +962,7 @@ inline void ld_a_ff_c(void) {
 }
 
 // 0xf3
-inline void di_inst(void) { cpu.IME = 0; }
+inline void di_inst(void) { cpu.IME = 0; imeDelay = 0; }
 
 // 0xf5
 inline void push_af(void) { writeShortToStack(cpu.registers.af); }
@@ -969,7 +998,7 @@ inline void ld_sp_hl(void) { cpu.registers.sp = cpu.registers.hl; }
 inline void ld_a_nnp(unsigned short operand) { cpu.registers.a = readByte(operand); }
 
 // 0xfb
-inline void ei(void) { cpu.IME = 1; }
+inline void ei(void) { imeDelay = 1; }
 
 //0xff
 inline void rst_38(void) { writeShortToStack(cpu.registers.pc); cpu.registers.pc = 0x0038; }
@@ -1001,26 +1030,55 @@ static const char* regNames[8] = {
 };
 #endif
 
-#define INSTRUCTION_0(name,numticks,func,id,code)   case id: DebugInstruction(name); func(); cpu.clocks += (numticks - 4); code break;
-#define INSTRUCTION_1(name,numticks,func,id,code)   case id: DebugInstruction(name, pc[1]); { cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF; func(pc[1]); cpu.clocks += (numticks - 4); code } break;
-#define INSTRUCTION_1S(name,numticks,func,id,code)  case id: DebugInstruction(name, pc[1]); { cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF; func((signed char) pc[1]); cpu.clocks += (numticks - 4); code } break;
-#define INSTRUCTION_2(name,numticks,func,id,code)   case id: DebugInstruction(name, pc[1] | (pc[2] << 8)); { cpu.registers.pc = (cpu.registers.pc + 2) & 0xFFFF; func(pc[1] | (pc[2] << 8)); cpu.clocks += (numticks - 4); code } break;
+static inline unsigned char fetchByte8(unsigned char* pcPtr, unsigned int origPc) {
+	if (cpu.registers.pc == ((origPc + 1) & 0xFFFF) && (origPc & 0xFF) < 0xFF) {
+		cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF;
+		return pcPtr[1];
+	}
+	unsigned char val = readByte(cpu.registers.pc);
+	cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF;
+	return val;
+}
+
+static inline unsigned short fetchWord16(unsigned char* pcPtr, unsigned int origPc) {
+	if (cpu.registers.pc == ((origPc + 1) & 0xFFFF) && (origPc & 0xFF) < 0xFE) {
+		cpu.registers.pc = (cpu.registers.pc + 2) & 0xFFFF;
+		return (unsigned short)(pcPtr[1] | (pcPtr[2] << 8));
+	}
+	unsigned char lo = readByte(cpu.registers.pc);
+	cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF;
+	unsigned char hi = readByte(cpu.registers.pc);
+	cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF;
+	return (unsigned short)(lo | (hi << 8));
+}
+
+#define INSTRUCTION_0(name,numticks,func,id,code)   case id: DebugInstruction(name); func(); cpu.clocks += (numticks); code break;
+#define INSTRUCTION_1(name,numticks,func,id,code)   case id: { unsigned char op = fetchByte8(pc, pcAddr); DebugInstruction(name, op); func(op); cpu.clocks += (numticks); code } break;
+#define INSTRUCTION_1S(name,numticks,func,id,code)  case id: { signed char op = (signed char)fetchByte8(pc, pcAddr); DebugInstruction(name, (unsigned char)op); func(op); cpu.clocks += (numticks); code } break;
+#define INSTRUCTION_2(name,numticks,func,id,code)   case id: { unsigned short op = fetchWord16(pc, pcAddr); DebugInstruction(name, op); func(op); cpu.clocks += (numticks); code } break;
 #define INSTRUCTION_L(name,numticks,func,id,code)   case id: 
-#define INSTRUCTION_E(name,numticks,func,id,code)   case id: DebugInstructionMapped(name, regNames[pc[0] & 7]); func(*regMap[pc[0] & 7]); cpu.clocks += (numticks - 4); code break;
-#define CB_INSTRUCTION(name,numticks,func,id,code)  case id: DebugInstruction(name); func(); cpu.clocks += (numticks - 4); code break;
+#define INSTRUCTION_E(name,numticks,func,id,code)   case id: DebugInstructionMapped(name, regNames[opcode & 7]); func(*regMap[opcode & 7]); cpu.clocks += (numticks); code break;
+#define CB_INSTRUCTION(name,numticks,func,id,code)  case id: DebugInstruction(name); func(); cpu.clocks += (numticks); code break;
 #define CB_INSTR______(name,numticks,func,id,code)  case id: 
-#define CB_INSTRMAPPED(name,numticks,func,id,code)  case id: DebugInstructionMapped(name, regNames[operand & 7]); func(*regMap[operand & 7]); cpu.clocks += (numticks - 4); code break;
+#define CB_INSTRMAPPED(name,numticks,func,id,code)  case id: DebugInstructionMapped(name, regNames[operand & 7]); func(*regMap[operand & 7]); cpu.clocks += (numticks); code break;
 
-#define LEAVE_LOOP {cpu.clocks -= (numInstr - i - 1) * 4; i = numInstr;}
+#define LEAVE_LOOP { i = numInstr; }
 
-void cb_n(int operand);
+void cb_n(unsigned char operand);
 
 void cpuStep() {
 	{
 		TIME_SCOPE();
 
 		for (int b = 0; b < BATCHES; b++) {
-			if (cpu.stopped || cpu.halted) {
+			if (cpu.stopped) {
+				// Advance clocks for GPU/key polling while keeping DIV and TIMA frozen during STOP
+				unsigned int gpuDelta = (cpu.gpuTick > cpu.clocks) ? (cpu.gpuTick - cpu.clocks) : 0;
+				unsigned int numClocks = max(gpuDelta, 4U);
+				cpu.clocks += numClocks;
+				cpu.divBase = cpu.clocks;
+				cpu.timerBase = cpu.clocks;
+			} else if (cpu.halted) {
 				// just advance the clock til something happens
 				unsigned int gpuDelta = (cpu.gpuTick > cpu.clocks) ? (cpu.gpuTick - cpu.clocks) : 0;
 				unsigned int numClocks = max(gpuDelta, 4U);
@@ -1041,25 +1099,34 @@ void cpuStep() {
 					numInstr = min(max(timerDelta, (unsigned int)(MIN_CPU_BATCH * 8)) / 8, numInstr);
 				}
 
-				// instructions start with a "base" of 4 clocks a piece
-				cpu.clocks += numInstr * 4;
-
 				for (unsigned int i = 0; i < numInstr; i++) {
-					DebugPC(cpu.registers.pc);
-					unsigned char* pc = getInstrByte(cpu.registers.pc);
-					cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF;
+					bool applyIme = (imeDelay != 0);
+					unsigned int pcAddr = cpu.registers.pc;
+					DebugPC(pcAddr);
+					unsigned char* pc = getInstrByte(pcAddr);
+					unsigned char opcode = pc[0];
+					if (haltBug) {
+						haltBug = 0;
+					} else {
+						cpu.registers.pc = (pcAddr + 1) & 0xFFFF;
+					}
 					// perform inlined instruction op
-					switch (pc[0]) {
+					switch (opcode) {
 						// main instruction set
 						#include "cpu_instructions.inl"
 						// handle extended instruction set call
 						case 0xcb:
-							cb_n(pc[1]);
+							cb_n(fetchByte8(pc, pcAddr));
 							break; 
 							// unknown instruction
 						default:
 							undefined();
 							break;
+					}
+					if (applyIme && imeDelay) {
+						imeDelay = 0;
+						cpu.IME = 1;
+						break;
 					}
 				}
 			}
@@ -1082,8 +1149,7 @@ void cpuStep() {
 	}
 }
 
-void cb_n(int operand) {
-	cpu.registers.pc = (cpu.registers.pc + 1) & 0xFFFF;
+void cb_n(unsigned char operand) {
 	switch (operand) {
 #include "cb_instructions.inl"
 	}
@@ -1096,3 +1162,6 @@ void cb_n(int operand) {
 #undef INSTRUCTION_L
 #undef INSTRUCTION_E
 #undef CB_INSTRUCTION
+#undef CB_INSTR______
+#undef CB_INSTRMAPPED
+#undef LEAVE_LOOP

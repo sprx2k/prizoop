@@ -12,4 +12,5 @@ target_include_directories(calctype
 
 target_compile_options(calctype PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-std=c99>
-  -Os -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch)
+  -Os -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch
+  -ffunction-sections -fdata-sections)

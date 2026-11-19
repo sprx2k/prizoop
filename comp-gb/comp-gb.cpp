@@ -6,7 +6,7 @@
 #include <Shlobj.h>
 #include <cstdio>
 
-#include "../../prizm-zx7/zx7.inl"
+#include "../utils/zx7/zx7.h"
 
 bool FileOpen(char* intoPath)
 {
@@ -68,7 +68,8 @@ int CALLBACK WinMain(
 	_In_ int       nCmdShow
 	) {
 
-	CoInitialize(NULL);
+	HRESULT coHr = CoInitialize(NULL);
+	int exitCode = 0;
 
 	char path[512];
 	if (FileOpen(path)) {
@@ -80,36 +81,72 @@ int CALLBACK WinMain(
 		//  2 byte word of num 4K pages (N) with 2 byte instruction overlap
 		//  N 2 byte words of compressed page sizes (4098 if left uncompressed)
 		//  N zx7 compressed pages
-		FILE* f;
-		if (fopen_s(&f, path, "rb")) {
+		FILE* f = NULL;
+		if (fopen_s(&f, path, "rb") || !f) {
 			OutputDebugString("Couldn't open for ROM read!\n");
+			if (SUCCEEDED(coHr)) CoUninitialize();
 			return -1;
 		}
 		fseek(f, 0, SEEK_END);
 
-		// number of pages
-		unsigned int size = ftell(f);
-		int numPages = size / 4096;
+		long fileSize = ftell(f);
+		if (fileSize < 0x180 || fileSize > 4 * 1024 * 1024 || (fileSize % 4096) != 0) {
+			OutputDebugString("Invalid ROM file size!\n");
+			fclose(f);
+			if (SUCCEEDED(coHr)) CoUninitialize();
+			return -1;
+		}
 
-		// read ROM into memory
-		unsigned char* rom = (unsigned char*) malloc(size+2);
+		unsigned int size = (unsigned int)fileSize;
+		int numPages = (int)(size / 4096);
+
+		// read ROM into memory (plus 2 zeroed overlap bytes past end)
+		unsigned char* rom = (unsigned char*) malloc(size + 2);
+		if (!rom) {
+			OutputDebugString("Out of memory reading ROM!\n");
+			fclose(f);
+			if (SUCCEEDED(coHr)) CoUninitialize();
+			return -1;
+		}
 		fseek(f, 0, SEEK_SET);
-		fread(rom, 1, size, f);
+		size_t readCount = fread(rom, 1, size, f);
 		fclose(f);
+		if (readCount != size) {
+			OutputDebugString("Failed to read complete ROM file!\n");
+			free(rom);
+			if (SUCCEEDED(coHr)) CoUninitialize();
+			return -1;
+		}
+		rom[size] = 0;
+		rom[size + 1] = 0;
 
-		// create compressed rom
-		char* period = strrchr(path, '.');
+		// create compressed rom path (only strip '.' after the last path separator)
+		const char* lastSlash = strrchr(path, '\\');
+		const char* lastFwdSlash = strrchr(path, '/');
+		const char* baseName = lastSlash > lastFwdSlash ? lastSlash : lastFwdSlash;
+		const char* period = strrchr(path, '.');
 		char newPath[512];
-		strncpy_s(newPath, 512, path, period - path);
-		strcat_s(newPath, 512, ".gbz");
-		if (fopen_s(&f, newPath, "wb")) {
+		if (period && (!baseName || period > baseName)) {
+			size_t prefixLen = (size_t)(period - path);
+			if (prefixLen >= sizeof(newPath) - 5) {
+				prefixLen = sizeof(newPath) - 5;
+			}
+			strncpy_s(newPath, sizeof(newPath), path, prefixLen);
+		} else {
+			strncpy_s(newPath, sizeof(newPath), path, sizeof(newPath) - 5);
+		}
+		strcat_s(newPath, sizeof(newPath), ".gbz");
+
+		if (fopen_s(&f, newPath, "wb") || !f) {
 			OutputDebugString("Couldn't open for ROM write!\n");
+			free(rom);
+			if (SUCCEEDED(coHr)) CoUninitialize();
 			return -1;
 		}
 
 		// progress bar stuff
 		IProgressDialog *pd = NULL;
-		HRESULT hr = hr = CoCreateInstance(CLSID_ProgressDialog, NULL, CLSCTX_INPROC_SERVER, IID_IProgressDialog, (LPVOID *) (&pd));
+		CoCreateInstance(CLSID_ProgressDialog, NULL, CLSCTX_INPROC_SERVER, IID_IProgressDialog, (LPVOID *) (&pd));
 		if (pd) {
 			pd->StartProgressDialog(NULL, NULL, PROGDLG_NORMAL | PROGDLG_AUTOTIME | PROGDLG_NOMINIMIZE, NULL);
 			pd->SetTitle(L"Compressing ROM File...");
@@ -120,11 +157,11 @@ int CALLBACK WinMain(
 		fwrite(rom, 1, 0x180, f);
 
 		// num chunks (big endian format)
-		unsigned short numChunks = EndianSwapShort(numPages);
+		unsigned short numChunks = (unsigned short)EndianSwapShort(numPages);
 		fwrite(&numChunks, 1, 2, f);
 
 		// write 0'd out sizes for now
-		unsigned int tablePos = ftell(f);
+		long tablePos = ftell(f);
 		unsigned short zero = 0;
 		for (int i = 0; i < numPages; i++) {
 			fwrite(&zero, 1, 2, f);
@@ -137,15 +174,15 @@ int CALLBACK WinMain(
 			memcpy(page, rom + i * 4096, 4098);
 
 			unsigned char* compPage = 0;
-			int size = ZX7Compress(page, 4098, &compPage);
+			int compSize = ZX7Compress(page, 4098, &compPage);
 
 			// ignore compression if not at least better than 10% reduction
-			if (size && size < 3700) {
+			if (compSize > 0 && compSize < 3700 && compPage) {
 				// write out compressed page
-				fwrite(compPage, 1, size, f);
+				fwrite(compPage, 1, compSize, f);
 			} else {
 				// decompressed is better for this page
-				size = 4098;
+				compSize = 4098;
 				fwrite(page, 1, 4098, f);
 			}
 
@@ -154,9 +191,9 @@ int CALLBACK WinMain(
 			}
 
 			// output result size to table
-			unsigned int pos = ftell(f);
+			long pos = ftell(f);
 			fseek(f, tablePos, SEEK_SET);
-			unsigned short chunkSize = EndianSwapShort(size);
+			unsigned short chunkSize = (unsigned short)EndianSwapShort(compSize);
 			fwrite(&chunkSize, 1, 2, f);
 			tablePos += 2;
 			fseek(f, pos, SEEK_SET);
@@ -173,7 +210,12 @@ int CALLBACK WinMain(
 		}
 
 		fclose(f);
+		free(rom);
 	}
 
-	return 0;
+	if (SUCCEEDED(coHr)) {
+		CoUninitialize();
+	}
+
+	return exitCode;
 }

@@ -1,3 +1,6 @@
+#ifndef _FXCG_REGISTERS_H
+#define _FXCG_REGISTERS_H
+
 #define P00CR 0xA4050100
 #define P00DR (P00CR+0x20)
 #define P01CR (P00CR+2)
@@ -138,3 +141,5 @@
 #define CETR1 0xFF200038
 #define CCMFR 0xFF200600
 #define CBCR 0xFF200620
+
+#endif

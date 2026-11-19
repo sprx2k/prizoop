@@ -46,7 +46,7 @@ inline void RenderDMGScanline() {
 			int wx = cpu.memory.WX_windowx;
 			int y = curLine - cpu.memory.WY_windowy + windowLineOffset;
 
-			if (wx <= 166 && y >= 0) {
+			if (wx <= 166 && y >= 0 && y < 256) {
 				// select map offset row
 				int mapOffset = (cpu.memory.LCDC_ctl & LCDC_WINDOWTILEMAP) ? 0x1c00 : 0x1800;
 				mapOffset += (y >> 3) << 5;
@@ -113,7 +113,7 @@ inline void RenderDMGScanline() {
 					unsigned int tileRow = *((unsigned short*)&vram[tile * 16 + y * 2]);
 					ShortSwap(tileRow);
 
-					unsigned char colors[8];
+					unsigned char colors[8] ALIGN(4);
 					if (!OAM_ATTR_XFLIP(sprite->attr)) {
 						resolveTileRow<false>(colors, tileRow);
 					} else {

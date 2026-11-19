@@ -12,6 +12,7 @@ struct screen_rom : public emulator_screen {
 	int selectedFile;
 	int loadedFile;
 	int curScroll;
+	bool blockedByExamMode;
 
 	virtual void setup() override;
 	virtual void select() override;

@@ -35,10 +35,10 @@ struct InstructionsHistory {
 	char instr[64];
 	registers_type regs;
 };
-extern int instr_slot;
+extern unsigned int instr_slot;
 extern InstructionsHistory instr_hist[DEBUG_TRACKINSTRUCTIONS];
-#define DebugInstruction(...) { sprintf(instr_hist[instr_slot % DEBUG_TRACKINSTRUCTIONS].instr, __VA_ARGS__); instr_hist[(instr_slot++) % DEBUG_TRACKINSTRUCTIONS].regs = cpu.registers; }
-#define DebugInstructionMapped(...) { sprintf(instr_hist[instr_slot % DEBUG_TRACKINSTRUCTIONS].instr, __VA_ARGS__); instr_hist[(instr_slot++) % DEBUG_TRACKINSTRUCTIONS].regs = cpu.registers; }
+#define DebugInstruction(...) { snprintf(instr_hist[instr_slot % DEBUG_TRACKINSTRUCTIONS].instr, sizeof(instr_hist[0].instr), __VA_ARGS__); instr_hist[(instr_slot++) % DEBUG_TRACKINSTRUCTIONS].regs = cpu.registers; }
+#define DebugInstructionMapped(...) { snprintf(instr_hist[instr_slot % DEBUG_TRACKINSTRUCTIONS].instr, sizeof(instr_hist[0].instr), __VA_ARGS__); instr_hist[(instr_slot++) % DEBUG_TRACKINSTRUCTIONS].regs = cpu.registers; }
 #endif
 
 #define OutputLog(...) { char buffer[1024]; sprintf_s(buffer, 1024, __VA_ARGS__); OutputDebugString(buffer); }

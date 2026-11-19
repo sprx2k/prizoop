@@ -68,9 +68,9 @@ struct rtc_state {
 	unsigned char isHalted;			// whether RTC is currently halted (curRTC won't change)
 };
 
-// each cache has 2 extra bytes in it to account for instruction overlap
+// each cache has 2 extra bytes in it to account for instruction overlap (padded to 4-byte alignment)
 struct mbc_bankcache {
-	unsigned char bank[0x1002];
+	unsigned char bank[0x1004];
 };
 
 extern mbc_state mbc;

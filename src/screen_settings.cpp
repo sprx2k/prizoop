@@ -45,8 +45,13 @@ void screen_settings::select() {
 	}
 
 	// disable overclock on non CG-20 devices and when already overclocked (such as when using Ptune2)
-	int currentPtuneSetting = Ptune2_GetSetting();
-	options[0].disabled = getDeviceType() != DT_CG20 || currentPtuneSetting != PT2_DEFAULT;
+	options[0].disabled = (getDeviceType() != DT_CG20) || (Ptune2_GetSetting() != PT2_DEFAULT);
+
+#if PRIZOOP_IS_CW
+	// fx-CG100 has no 2.5mm audio/serial jack
+	options[9].disabled = true;
+	emulator.settings.sound = 0;
+#endif
 
 	if (emulator.isCGBRomLoaded()) {
 		options[2].noCGB = true;
@@ -60,7 +65,9 @@ void screen_settings::select() {
 	}
 
 	// can't select disabled option
-	while (options[curOption].disabled) curOption = (curOption + 1) % NumOptions();
+	for (int tries = 0; tries < NumOptions() && options[curOption].disabled; tries++) {
+		curOption = (curOption + 1) % NumOptions();
+	}
 
 	drawOptions();
 }
@@ -147,6 +154,18 @@ static const char* keyName[] = {
 	"A", "B", "Select", "Start", "Right", "Left", "Up", "Down", "Save State", "Load State"
 };
 
+static void drainKeyBuffer() {
+#if !TARGET_WINSIM
+	int col = 0, row = 0;
+	unsigned short keycode = 0;
+	for (int i = 0; i < 32; i++) {
+		if (GetKeyWait_OS(&col, &row, KEYWAIT_HALTOFF_TIMEROFF, 0, 0, &keycode) == KEYREP_NOEVENT) {
+			break;
+		}
+	}
+#endif
+}
+
 unsigned char getCurrentKey(bool wait = true) {
 	unsigned char keyPressed = 0;
 	do {
@@ -193,7 +212,7 @@ void screen_settings::selectKeys() {
 		Bdisp_AreaClr(&area, 1, COLOR_WHITE);
 
 		const char* pressKey = "Press key for ";
-		const char* exitPrompt = _("Press MENU to cancel", "Press HOME to cancel");
+		const char* exitPrompt = PRIZOOP_SEL("Press MENU to cancel", "Press HOME to cancel");
 
 		int line1WidthA = PrintWidth(pressKey);
 		int line1WidthB = PrintWidth(keyName[i]);
@@ -210,18 +229,22 @@ void screen_settings::selectKeys() {
 		newMap[i] = getCurrentKey();
 
 		// MENU (CG50) / HOME (CG100) = cancel
-		if (newMap[i] == _(48, 69))
+		if (newMap[i] == PRIZOOP_SEL(48, 69)) {
+			drainKeyBuffer();
 			return;
+		}
 	}
 
 	// copy to settings
 	memcpy(emulator.settings.keyMap, newMap, sizeof(newMap));
+	drainKeyBuffer();
 }
 
 void screen_settings::handleUp() {
-	do {
+	for (int tries = 0; tries < NumOptions(); tries++) {
 		curOption = (curOption + NumOptions() - 1) % NumOptions();
-	} while (options[curOption].disabled);
+		if (!options[curOption].disabled) break;
+	}
 
 	ResolveBG(bg_menu);
 	DrawPausePreview();
@@ -229,9 +252,10 @@ void screen_settings::handleUp() {
 }
 
 void screen_settings::handleDown() {
-	do {
+	for (int tries = 0; tries < NumOptions(); tries++) {
 		curOption = (curOption + 1) % NumOptions();
-	} while (options[curOption].disabled);
+		if (!options[curOption].disabled) break;
+	}
 
 	ResolveBG(bg_menu);
 	DrawPausePreview();

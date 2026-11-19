@@ -104,3 +104,7 @@ void sndVolumeDown() {
 		updateSettings();
 	}
 }
+
+#if TARGET_WINSIM
+void sndResetSync() {}
+#endif

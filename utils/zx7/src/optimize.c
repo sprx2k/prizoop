@@ -63,6 +63,10 @@ Optimal* optimize(const unsigned char *input_data, unsigned int input_size, unsi
     unsigned int bits;
     unsigned int i;
 
+    if (!input_data || input_size == 0 || skip >= input_size) {
+        return 0;
+    }
+
     /* allocate all data structures at once */
     min = (unsigned int *)calloc(MAX_OFFSET+1, sizeof(unsigned int));
     max = (unsigned int *)calloc(MAX_OFFSET+1, sizeof(unsigned int));
@@ -71,6 +75,11 @@ Optimal* optimize(const unsigned char *input_data, unsigned int input_size, unsi
     optimal = (Optimal *)calloc(input_size, sizeof(Optimal));
 
     if (!min || !max || !matches || !match_slots || !optimal) {
+        free(min);
+        free(max);
+        free(matches);
+        free(match_slots);
+        free(optimal);
 		return 0;
     }
 

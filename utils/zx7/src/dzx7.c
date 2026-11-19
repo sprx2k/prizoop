@@ -29,102 +29,166 @@
 extern "C" {
 #endif
 
-const unsigned char *d_input_data;
-unsigned char *d_output_data;
-unsigned int d_input_index;
-unsigned int d_output_index;
-unsigned int d_input_size;
-int bit_mask;
-int bit_value;
+typedef struct {
+    const unsigned char *input_data;
+    unsigned char *output_data;
+    unsigned int input_index;
+    unsigned int input_size;
+    unsigned int output_index;
+    unsigned int output_size;
+    int bit_mask;
+    int bit_value;
+    int error;
+} ZX7State;
 
-static inline int d_read_byte() {
-    return d_input_data[d_input_index++];
-}
-
-static inline int d_read_bit() {
-    bit_mask >>= 1;
-    if (bit_mask == 0) {
-        bit_mask = 128;
-        bit_value = d_read_byte();
+static inline int d_read_byte(ZX7State *s) {
+    if (s->input_index >= s->input_size) {
+        s->error = 1;
+        return 0;
     }
-    return bit_value & bit_mask ? 1 : 0;
+    return s->input_data[s->input_index++];
 }
 
-static inline int read_elias_gamma() {
-    int i;
+static inline int d_read_bit(ZX7State *s) {
+    s->bit_mask >>= 1;
+    if (s->bit_mask == 0) {
+        s->bit_mask = 128;
+        s->bit_value = d_read_byte(s);
+    }
+    return (s->bit_value & s->bit_mask) ? 1 : 0;
+}
+
+static inline int read_elias_gamma(ZX7State *s) {
+    int i = 0;
     int value;
 
-    i = 0;
-    while (!d_read_bit()) {
+    while (!d_read_bit(s)) {
         i++;
+        if (s->error || i > 16) {
+            s->error = 1;
+            return -2;
+        }
     }
-    if (i > 15) {
-        return -1;
+    if (s->error) {
+        return -2;
+    }
+    if (i == 16) {
+        return -1; /* EOF marker */
     }
     value = 1;
     while (i--) {
-        value = value << 1 | d_read_bit();
+        value = (value << 1) | d_read_bit(s);
+        if (s->error) {
+            return -2;
+        }
     }
     return value;
 }
 
-static int read_offset() {
-    int value;
-    int i;
-
-    value = d_read_byte();
+static int read_offset(ZX7State *s) {
+    int value = d_read_byte(s);
+    if (s->error) {
+        return -1;
+    }
     if (value < 128) {
         return value;
     } else {
-        i = d_read_bit();
-        i = i << 1 | d_read_bit();
-        i = i << 1 | d_read_bit();
-        i = i << 1 | d_read_bit();
+        int i = d_read_bit(s);
+        i = (i << 1) | d_read_bit(s);
+        i = (i << 1) | d_read_bit(s);
+        i = (i << 1) | d_read_bit(s);
+        if (s->error) {
+            return -1;
+        }
         return ((value & 127) | (i << 7)) + 128;
     }
 }
 
-static inline void d_write_byte(int value) {
-    d_output_data[d_output_index++] = value;
+static inline int d_write_byte(ZX7State *s, int value) {
+    if (s->output_index >= s->output_size) {
+        s->error = 1;
+        return 0;
+    }
+    s->output_data[s->output_index++] = (unsigned char)value;
+    return 1;
 }
 
-void d_write_bytes(int offset, int length) {
-    int i;
-    while (length-- > 0) {
-        i = d_output_index-offset;
-        d_write_byte(d_output_data[i]);
+static int d_write_bytes(ZX7State *s, unsigned int offset, unsigned int length) {
+    if (offset == 0 || offset > s->output_index || length > s->output_size - s->output_index) {
+        s->error = 1;
+        return 0;
     }
+    while (length-- > 0) {
+        unsigned char b = s->output_data[s->output_index - offset];
+        s->output_data[s->output_index++] = b;
+    }
+    return 1;
 }
 
 unsigned int ZX7GetDecompressedSize(const unsigned char* compressedData) {
-	return compressedData[0] * 65536 + compressedData[1] * 256 + compressedData[2];
+    if (!compressedData) {
+        return 0;
+    }
+    return ((unsigned int)compressedData[0] << 16) |
+           ((unsigned int)compressedData[1] << 8) |
+           (unsigned int)compressedData[2];
 }
 
-int ZX7Decompress(const unsigned char* srcData, unsigned char* destData, unsigned int destLength) {
-	if (destLength < ZX7GetDecompressedSize(srcData) || !srcData || !destData) {
-		return -1;
-	}
+int ZX7Decompress(const unsigned char* srcData, unsigned int srcLength, unsigned char* destData, unsigned int destLength) {
+    ZX7State s;
+    unsigned int expectedSize;
+    int firstByte;
 
-    int length;
+    if (!srcData || !destData || srcLength < 4) {
+        return -1;
+    }
 
-	d_input_data = srcData + 3;
-	d_output_data = destData;
+    expectedSize = ZX7GetDecompressedSize(srcData);
+    if (expectedSize == 0 || expectedSize > destLength) {
+        return -1;
+    }
 
-    d_input_size = 0;
-    d_input_index = 0;
-    d_output_index = 0;
-    bit_mask = 0;
+    s.input_data = srcData + 3;
+    s.output_data = destData;
+    s.input_index = 0;
+    s.input_size = srcLength - 3;
+    s.output_index = 0;
+    s.output_size = expectedSize;
+    s.bit_mask = 0;
+    s.bit_value = 0;
+    s.error = 0;
 
-    d_write_byte(d_read_byte());
+    firstByte = d_read_byte(&s);
+    if (s.error || !d_write_byte(&s, firstByte)) {
+        return -1;
+    }
+
     while (1) {
-        if (!d_read_bit()) {
-            d_write_byte(d_read_byte());
-        } else {
-            length = read_elias_gamma()+1;
-            if (length == 0) {
-                return 0;
+        int bit = d_read_bit(&s);
+        if (s.error) {
+            return -1;
+        }
+        if (!bit) {
+            int lit = d_read_byte(&s);
+            if (s.error || !d_write_byte(&s, lit)) {
+                return -1;
             }
-            d_write_bytes(read_offset()+1, length);
+        } else {
+            int gamma = read_elias_gamma(&s);
+            int offset;
+            if (gamma == -1) {
+                return (!s.error && s.output_index == expectedSize) ? 0 : -1;
+            }
+            if (gamma < 0) {
+                return -1;
+            }
+            offset = read_offset(&s);
+            if (s.error || offset < 0) {
+                return -1;
+            }
+            if (!d_write_bytes(&s, (unsigned int)offset + 1U, (unsigned int)gamma + 1U)) {
+                return -1;
+            }
         }
     }
 }

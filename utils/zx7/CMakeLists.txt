@@ -3,10 +3,7 @@
 cmake_minimum_required(VERSION 3.15)
 
 add_library(zx7 STATIC EXCLUDE_FROM_ALL
-  src/compress.c
-  src/dzx7.c
-  src/optimize.c
-  src/zx7.c)
+  src/dzx7.c)
 
 target_include_directories(zx7
   PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/.."
@@ -14,4 +11,5 @@ target_include_directories(zx7
 
 target_compile_options(zx7 PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-std=c99>
-  -Os -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch)
+  -Os -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch
+  -ffunction-sections -fdata-sections)

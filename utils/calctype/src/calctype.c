@@ -44,7 +44,7 @@ void CalcType_Draw(const CalcTypeFont* font, const char* text, int x, int y, uns
 	int startX = subX;
 	int maxX = pitch * 3;
 
-	while (*text && subX < maxX) {
+	while (*text) {
 		unsigned char ch = (unsigned char)*text;
 		if (ch <= 32) {
 			if (ch == 32) {
@@ -58,7 +58,11 @@ void CalcType_Draw(const CalcTypeFont* font, const char* text, int x, int y, uns
 			unsigned short dataOffset = font->charOffset[ch - 32];
 			if (dataOffset != 0xFFFF) {
 				CalcTypeCharData* glyph = (CalcTypeCharData*)(font->charData + dataOffset);
-				CalcType_DrawGlyph(glyph, (subX + glyph->xOffset) / 3, y + glyph->yOffset, color, vram, pitch);
+				if (subX < maxX) {
+					int gx = subX + glyph->xOffset;
+					int px = (gx >= 0) ? (gx / 3) : ((gx - 2) / 3);
+					CalcType_DrawGlyph(glyph, px, y + glyph->yOffset, color, vram, pitch);
+				}
 				subX += glyph->xAdvance;
 			}
 		}

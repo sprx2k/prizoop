@@ -32,7 +32,7 @@ namespace emu_scale {
 }
 
 // Emulation settings
-#define SETTINGS_VERSION _(4, 0x104)
+#define SETTINGS_VERSION PRIZOOP_SEL(4, 0x104)
 struct emulator_settings {
 	int version;
 	unsigned int faqOffset;		// faq text offset (top 8 bits are name hash, bottom 24 are actual offset)
@@ -60,8 +60,15 @@ extern const unsigned char* bg_1x1;
 extern const unsigned char* bg_fit;
 extern const unsigned char* bg_faq;
 
+extern const unsigned int bg_menu_size;
+extern const unsigned int bg_1x1_size;
+extern const unsigned int bg_fit_size;
+extern const unsigned int bg_faq_size;
+
 struct emulator_screen {
 	int fKey;
+
+	virtual ~emulator_screen() = default;
 
 	virtual void setup() {}
 	virtual void select() {}
@@ -78,7 +85,7 @@ struct emulator_screen {
 protected:
 	// helper functions
 	static void DrawBG(const char* filename);
-	static void DrawBGEmbedded(unsigned char* compressedData);
+	static void DrawBGEmbedded(const unsigned char* compressedData);
 
 	// Print a string at the given coordinates
 	static void Print(int x, int y, const char* buffer, bool selected, unsigned short color = COLOR_SILVER);
@@ -116,11 +123,7 @@ struct emulator_type {
 	void saveSettings();
 	void defaultSettings();
 
-	// load the given rom filename, returns false on error (unsupported MBC, etc)
-	bool loadRom(const char* filename);
-
 	// handling currently loaded rom
-	void bootLoadedRom();			// boots loaded rom from 0x100 address and reset Gameboy state
 	void saveState();
 	bool loadState();				// returns true if a state was found
 
@@ -140,6 +143,9 @@ void sndChannelInit(int channelNum);
 
 // called on rom start up to initialize sound registers
 void sndStartup();
+
+// frees allocated sound tables on shutdown
+void sndShutdown();
 
 // called from emulator (once per frame, so not quite every 1/64th of a second) to emulate register updates when sound emulation is turned off
 void sndInactiveFrame();

@@ -1,5 +1,6 @@
 #include "platform.h"
 #include "debug.h"
+#include <stdarg.h>
 
 #include "registers.h"
 #include "memory.h"
@@ -34,12 +35,21 @@ void ScreenPrint(char* buffer) {
 	printY += arial_small.height;
 }
 
+void prizoop_printf(const char* fmt, ...) {
+	char buffer[256];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	va_end(args);
+	ScreenPrint(buffer);
+}
+
 #if DEBUG
 #define BORDER "<><><><><><><><><><><><><><><><><><><><>\n"
 
 void failedAssert(const char* assertion) {
 	OutputLog("Failed assert:\n");
-	OutputLog(assertion);
+	OutputLog("%s", assertion);
 	OutputLog("\n");
 
 #if TARGET_WINSIM
@@ -63,23 +73,23 @@ void LogRegisters(void) {
 		readShort(cpu.registers.sp+4),
 		readShort(cpu.registers.sp+6),
 		readShort(cpu.registers.sp+8),
-		readShort(cpu.registers.sp+10))
+		readShort(cpu.registers.sp+10));
 }
 
 #if DEBUG_TRACKINSTRUCTIONS
-int instr_slot = 0;
+unsigned int instr_slot = 0;
 InstructionsHistory instr_hist[DEBUG_TRACKINSTRUCTIONS] = { 0 };
 
 void LogInstructionsHistory() {
 	OutputLog("Last %d instructions:\n", DEBUG_TRACKINSTRUCTIONS);
 	OutputLog(BORDER);
 	int i = 1;
-	int curInstruction = instr_slot % DEBUG_TRACKINSTRUCTIONS;
+	unsigned int curInstruction = instr_slot % DEBUG_TRACKINSTRUCTIONS;
 	OutputLog(" #   PC      INSTR                               AF   BC   DE   HL   SP\n");
 	do {
 		if (instr_hist[curInstruction].regs.pc) {
 			OutputLog("(%02d) 0x%04x: %s", i++, instr_hist[curInstruction].regs.pc - 1, instr_hist[curInstruction].instr);
-			for (int j = 36; j > strlen(instr_hist[curInstruction].instr); j--) {
+			for (int j = 36; j > (int)strlen(instr_hist[curInstruction].instr); j--) {
 				OutputLog(" ");
 			}
 			OutputLog("%04x %04x %04x %04x %04x\n", instr_hist[curInstruction].regs.af, instr_hist[curInstruction].regs.bc, instr_hist[curInstruction].regs.de, instr_hist[curInstruction].regs.hl, instr_hist[curInstruction].regs.sp);

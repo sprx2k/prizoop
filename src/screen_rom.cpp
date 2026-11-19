@@ -21,9 +21,16 @@ static void FindFiles(const char* path, foundFile* toArray, int& numFound) {
 	ret = Bfile_FindFirst((const char*)filter, &handle, (char*)found, &info);
 
 	while (ret == 0 && numFound < 64) {
-		Bfile_NameToStr_ncpy(toArray[numFound].path, found, 32);
-		toArray[numFound].path[31] = '\0';
-		numFound++;
+		int nameLen = 0;
+		while (nameLen < 32 && found[nameLen] != 0) {
+			nameLen++;
+		}
+		// Skip directories (type == 5) and filenames that would truncate in char path[32]
+		if (info.type != 5 && nameLen > 0 && nameLen < 32) {
+			Bfile_NameToStr_ncpy(toArray[numFound].path, found, 32);
+			toArray[numFound].path[31] = '\0';
+			numFound++;
+		}
 		ret = Bfile_FindNext(handle, (char*)found, (char*)&info);
 	};
 
@@ -35,6 +42,9 @@ static void FindFiles(const char* path, foundFile* toArray, int& numFound) {
 void screen_rom::discoverFiles() {
 	files = new foundFile[64];
 	numFiles = 0;
+	if (!files) {
+		return;
+	}
 	FindFiles("\\\\fls0\\*.gbz", files, numFiles);			// compressed gameboy ROM with utility
 	FindFiles("\\\\fls0\\*.gbc", files, numFiles);			// gameboy color
 	FindFiles("\\\\fls0\\*.gb", files, numFiles);			// gameboy
@@ -44,7 +54,12 @@ void screen_rom::discoverFiles() {
 }
 
 void screen_rom::drawFiles() {
+	if (!files) {
+		return;
+	}
+
 	ResolveBG(bg_menu);
+	DrawPausePreview();
 
 	for (int i = 0; i < numFiles; i++) {
 		int curY = i * 14 - curScroll;
@@ -64,7 +79,12 @@ void screen_rom::drawFiles() {
 }
 
 void screen_rom::setup() {
+	files = NULL;
+	numFiles = 0;
+	selectedFile = 0;
 	loadedFile = -1;
+	curScroll = 0;
+	blockedByExamMode = false;
 }
 
 void screen_rom::select() {
@@ -77,14 +97,19 @@ void screen_rom::select() {
 	}
 
 	if (isStorageLockedOrExamMode()) {
-		files = new foundFile[1];
+		blockedByExamMode = true;
+		files = NULL;
 		numFiles = 0;
 		ResolveBG(bg_menu);
 		int x = 10;
 		int y = 10;
 		PrintMini(&x, &y, "Disabled in Exam Mode / Storage Locked", 0x42, 0xffffffff, 0, 0, COLOR_RED, COLOR_BLACK, 1, 0);
+		EnableStatusArea(3);
+		DrawFrame(0);
+		Bdisp_PutDisp_DD();
 		return;
 	}
+	blockedByExamMode = false;
 
 	discoverFiles();
 
@@ -110,11 +135,14 @@ void screen_rom::select() {
 		int x = 10;
 		int y = 10;
 		PrintMini(&x, &y, "No .gb files found", 0x42, 0xffffffff, 0, 0, COLOR_RED, COLOR_BLACK, 1, 0);
+		EnableStatusArea(3);
+		DrawFrame(0);
+		Bdisp_PutDisp_DD();
 	}
 }
 
 void screen_rom::deselect() {
-	if (numFiles) {
+	if (numFiles && files) {
 		strcpy(emulator.settings.selectedRom, files[selectedFile].path);
 		if (selectedFile == loadedFile) {
 			char romFile[64];
@@ -128,8 +156,11 @@ void screen_rom::deselect() {
 
 	delete[] files;
 	files = NULL;
+	numFiles = 0;
 
-	emulator.saveSettings();
+	if (!blockedByExamMode) {
+		emulator.saveSettings();
+	}
 
 	emulator.pausePreviewValid = false;
 }

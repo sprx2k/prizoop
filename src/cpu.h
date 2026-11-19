@@ -133,6 +133,8 @@ extern cpu_type cpu ALIGN(256);
 
 // resets CPU to default GB settings
 void cpuReset(void);
+void cpuClearImeDelay(void);
+void cpuResetRuntimeState(void);
 
 void cpuStep(void);
 void updateDiv();
@@ -142,3 +144,4 @@ void updateTimer();
 // special timer based write functionality based on timer state
 void writeTIMA(unsigned char value);
 void writeTAC(unsigned char value);
+void resetTimerSubTicks();

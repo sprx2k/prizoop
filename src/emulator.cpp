@@ -1,7 +1,10 @@
-
 #include "emulator.h"
 #include "memory.h"
 #include "cgb.h"
+#include "gpu.h"
+#include "rom.h"
+#include "exam_mode.h"
+#include "snd/snd.h"
 
 #include "screen_rom.h"
 #include "screen_settings.h"
@@ -10,6 +13,25 @@
 #include "config.h"
 
 emulator_type emulator;
+
+static void setDefaultKeyMap(unsigned char* keyMap) {
+	memset(keyMap, 0, 12);
+	keyMap[emu_button::A] = PRIZOOP_SEL(78, 77);			// SHIFT (78 CG50, 77 CG100)
+	keyMap[emu_button::B] = PRIZOOP_SEL(68, 67);			// OPTN (68 CG50), ALPHA (67 CG100)
+	keyMap[emu_button::SELECT] = 39;						// F5 (CG50), >| (CG100)
+	keyMap[emu_button::START] = 29;							// F6 (CG50), PGUP (CG100)
+	keyMap[emu_button::RIGHT] = PRIZOOP_SEL(27, 38);
+	keyMap[emu_button::LEFT] = PRIZOOP_SEL(38, 58);
+	keyMap[emu_button::UP] = PRIZOOP_SEL(28, 49);
+	keyMap[emu_button::DOWN] = PRIZOOP_SEL(37, 47);
+	keyMap[emu_button::STATE_SAVE] = 43;					// 'x' multiply
+	keyMap[emu_button::STATE_LOAD] = 25;					// '->' (CG50), ')' (CG100)
+
+#if TARGET_WINSIM
+	keyMap[emu_button::STATE_SAVE] = 59;	// maps to F3
+	keyMap[emu_button::STATE_LOAD] = 49;	// maps to F4
+#endif
+}
 
 // Main emulator functionality
 void emulator_type::startUp() {
@@ -28,10 +50,10 @@ void emulator_type::startUp() {
 	screens[2] = new screen_play;
 	screens[3] = new screen_faq;
 
-	screens[0]->fKey = 1;
-	screens[1]->fKey = 2;
-	screens[2]->fKey = 6;
-	screens[3]->fKey = 5;
+	if (screens[0]) screens[0]->fKey = 1;
+	if (screens[1]) screens[1]->fKey = 2;
+	if (screens[2]) screens[2]->fKey = 6;
+	if (screens[3]) screens[3]->fKey = 5;
 
 	for (int i = 0; i < 6; i++) {
 		if (screens[i]) {
@@ -43,7 +65,13 @@ void emulator_type::startUp() {
 }
 
 void emulator_type::shutDown() {
-	screens[curScreen]->deselect();
+	if (curScreen >= 0 && curScreen < 6 && screens[curScreen]) {
+		screens[curScreen]->deselect();
+	}
+	for (int i = 0; i < 6; i++) {
+		delete screens[i];
+		screens[i] = NULL;
+	}
 }
 
 bool emulator_type::isCGBRomLoaded() {
@@ -56,11 +84,19 @@ bool emulator_type::isCGBRomLoaded() {
 }
 
 void emulator_type::run() {
+	if (curScreen < 0 || curScreen >= 6 || !screens[curScreen]) {
+		return;
+	}
+
 	screens[curScreen]->select();
 
-	int key;
+	int key = 0;
 	do {
 		GetKey(&key);
+
+		if (!screens[curScreen]) {
+			break;
+		}
 
 		switch (key) {
 			case KEY_CTRL_LEFT:
@@ -79,29 +115,35 @@ void emulator_type::run() {
 			case KEY_CTRL_EXE:
 				screens[curScreen]->handleSelect();
 				break;
-			case _(KEY_CTRL_F1, 30037):		// SETTINGS on fx-CG100
+			case PRIZOOP_SEL(KEY_CTRL_F1, 30075):	// PREVTAB (|<) on fx-CG100
 				tryScreenChange(1);
 				break;
-			case _(KEY_CTRL_F2, 30003):		// HOME on fx-CG100
+			case PRIZOOP_SEL(KEY_CTRL_F2, 30037):	// SETTINGS on fx-CG100
 				tryScreenChange(2);
 				break;
-			case _(KEY_CTRL_F3, 30075):		// PREVTAB (|<) on fx-CG100
+			case PRIZOOP_SEL(KEY_CTRL_F3, 30066):	// PAGEDOWN on fx-CG100
 				tryScreenChange(3);
 				break;
-			case _(KEY_CTRL_F4, 30066):		// PAGEDOWN on fx-CG100
+			case PRIZOOP_SEL(KEY_CTRL_F4, 30001):	// X,T,theta on fx-CG100
 				tryScreenChange(4);
 				break;
-			case _(KEY_CTRL_F5, 30074):		// NEXTTAB (>|) on fx-CG100
+			case PRIZOOP_SEL(KEY_CTRL_F5, 30074):	// NEXTTAB (>|) on fx-CG100
 				tryScreenChange(5);
 				break;
-			case _(KEY_CTRL_F6, 30065):		// PAGEUP on fx-CG100
+			case PRIZOOP_SEL(KEY_CTRL_F6, 30065):	// PAGEUP on fx-CG100
 				tryScreenChange(6);
 				break;
 		}
+#if PRIZOOP_IS_CW || TARGET_WINSIM
 	} while (key != KEY_CTRL_EXIT);
+#else
+	} while (true);
+#endif
 }
 
 void emulator_type::tryScreenChange(int targetFKey) {
+	if (curScreen < 0 || curScreen >= 6 || !screens[curScreen])
+		return;
 	if (targetFKey == screens[curScreen]->fKey)
 		return;
 
@@ -110,6 +152,7 @@ void emulator_type::tryScreenChange(int targetFKey) {
 			screens[curScreen]->deselect();
 			curScreen = i;
 			screens[curScreen]->select();
+			break;
 		}
 	}
 }
@@ -133,24 +176,13 @@ void emulator_type::defaultSettings() {
 	settings.useCGBColors = true;
 	settings.sound = false;
 
-	settings.keyMap[emu_button::A] = _(78, 77);			// SHIFT (78 CG50, 77 CG100)
-	settings.keyMap[emu_button::B] = _(68, 67);			// OPTN (68 CG50), ALPHA (67 CG100)
-	settings.keyMap[emu_button::SELECT] = 39;			// F5 (CG50), END/>| (CG100)
-	settings.keyMap[emu_button::START] = 29;			// F6 (CG50), PGUP (CG100)
-	settings.keyMap[emu_button::RIGHT] = _(27, 38);
-	settings.keyMap[emu_button::LEFT] = _(38, 58);
-	settings.keyMap[emu_button::UP] = _(28, 49);
-	settings.keyMap[emu_button::DOWN] = _(37, 47);
-	settings.keyMap[emu_button::STATE_SAVE] = 43;		// 'x' multiply
-	settings.keyMap[emu_button::STATE_LOAD] = 25;		// '->' (CG50), ')' (CG100)
+	setDefaultKeyMap(settings.keyMap);
 
 	settings.faqOffset = 0;
 
 	// simulator only defaults
 #if TARGET_WINSIM
 	settings.frameSkip = 0;
-	settings.keyMap[emu_button::STATE_SAVE] = 59;	// maps to F3
-	settings.keyMap[emu_button::STATE_LOAD] = 49;	// maps to F4
 #endif
 }
 
@@ -165,7 +197,11 @@ bool emulator_type::loadSettings() {
 				emulator.settings.overclock = emulator.settings.overclock ? 1 : 0;
 				emulator.settings.useCGBColors = emulator.settings.useCGBColors ? 1 : 0;
 				emulator.settings.clampSpeed = emulator.settings.clampSpeed ? 1 : 0;
+#if PRIZOOP_IS_CW
+				emulator.settings.sound = 0;
+#else
 				emulator.settings.sound = emulator.settings.sound ? 1 : 0;
+#endif
 				if (emulator.settings.scaleMode >= emu_scale::MAX) {
 					emulator.settings.scaleMode = emu_scale::LO_150;
 				}
@@ -180,6 +216,17 @@ bool emulator_type::loadSettings() {
 				}
 				if (emulator.settings.obj2ColorPalette >= numPalettes()) {
 					emulator.settings.obj2ColorPalette = 0;
+				}
+				bool keyMapValid = true;
+				for (int i = 0; i < emu_button::MAX; i++) {
+					unsigned char kc = emulator.settings.keyMap[i];
+					if (kc < 10 || kc >= 90 || (kc % 10) == 0) {
+						keyMapValid = false;
+						break;
+					}
+				}
+				if (!keyMapValid) {
+					setDefaultKeyMap(emulator.settings.keyMap);
 				}
 				return true;
 			}
@@ -272,116 +319,157 @@ int getSaveStateSize(unsigned int& withRAMSize) {
 	return spaceNeeded;
 }
 
-static void CompatSwaps() {
-	EndianSwap(cpu.registers.pc);
-	EndianSwap(cpu.registers.sp);
-	EndianSwap(cpu.clocks);
-	EndianSwap(cpu.div);
-	EndianSwap(cpu.divBase);
-	EndianSwap(cpu.timer);
-	EndianSwap(cpu.timerBase);
-	EndianSwap(cpu.timerInterrupt);
-	EndianSwap(cpu.gpuTick);
-	EndianSwap((unsigned int&)mbc.type);
-	EndianSwap((unsigned int&)mbc.ramType);
+static void CompatSwapsState(cpu_type& c, mbc_state& m, cgb_type& g, bool isCGB) {
+	EndianSwap(c.registers.af);
+	EndianSwap(c.registers.bc);
+	EndianSwap(c.registers.de);
+	EndianSwap(c.registers.hl);
+	EndianSwap(c.registers.pc);
+	EndianSwap(c.registers.sp);
+	EndianSwap(c.IME);
+	EndianSwap(c.clocks);
+	EndianSwap(c.halted);
+	EndianSwap(c.stopped);
+	EndianSwap(c.div);
+	EndianSwap(c.divBase);
+	EndianSwap(c.timer);
+	EndianSwap(c.timerBase);
+	EndianSwap(c.timerInterrupt);
+	EndianSwap(c.gpuTick);
+	EndianSwap((unsigned int&)m.type);
+	EndianSwap((unsigned int&)m.ramType);
+	EndianSwap(m.numRomBanks);
 
-	if (cgb.isCGB) {
-		EndianSwap((unsigned int&)cgb.selectedWRAM);
-		EndianSwap((unsigned int&)cgb.selectedVRAM);
-		EndianSwap(cgb.dmaSrc);
-		EndianSwap(cgb.dmaDest);
-		EndianSwap(cgb.dmaLeft);
-		EndianSwap(cgb.curPalTarget);
+	if (isCGB) {
+		EndianSwap((unsigned int&)g.selectedWRAM);
+		EndianSwap((unsigned int&)g.selectedVRAM);
+		EndianSwap(g.dmaSrc);
+		EndianSwap(g.dmaDest);
+		EndianSwap(g.dmaLeft);
+		EndianSwap(g.curPalTarget);
 	}
 }
 
 void emulator_type::saveState() {
+	if (mbc.romFile < 0 || !vram) {
+		return;
+	}
+
 #if !TARGET_WINSIM
 	// flush DMA before making OS calls
 	DmaWaitNext();
 #endif
 
+	if (isStorageLockedSafe()) {
+		mbcFileUpdate();
+		return;
+	}
+
 	// calculate space needed for state
 	unsigned int RAMSize;
 	int spaceNeeded = getSaveStateSize(RAMSize);
+	size_t createSize = (size_t)spaceNeeded;
 
 	unsigned short pFile[256];
 	fillSaveStatePath(pFile);
 
-	int hFile = Bfile_OpenFile_OS(pFile, WRITE, 0); // Get handle
-	if (hFile < 0) {
-		// attempt to create if it doesn't exist
-		if (Bfile_CreateEntry_OS(pFile, CREATEMODE_FILE, (size_t*)&spaceNeeded))
-			return;
-
-		hFile = Bfile_OpenFile_OS(pFile, WRITE, 0); // Get handle
-		if (hFile < 0) {
-			// create didn't work!
-			return;
-		}
+	Bfile_DeleteEntry(pFile);
+	if (Bfile_CreateEntry_OS(pFile, CREATEMODE_FILE, &createSize) < 0) {
+		mbcFileUpdate();
+		return;
 	}
 
-	CompatSwaps();
+	int hFile = Bfile_OpenFile_OS(pFile, WRITE, 0); // Get handle
+	if (hFile < 0) {
+		Bfile_DeleteEntry(pFile);
+		mbcFileUpdate();
+		return;
+	}
+
+	CompatSwapsState(cpu, mbc, cgb, cgb.isCGB != 0);
+
+	bool writeOk = true;
 
 	// write rom bytes 0x14E-F (checksum) for sanity
-	Bfile_WriteFile_OS(hFile, &cart[0x14E], 4);
+	if (Bfile_WriteFile_OS(hFile, &cart[0x14E], 4) < 0) writeOk = false;
 
 	// write cpu and mbc state
-	Bfile_WriteFile_OS(hFile, &cpu, sizeof(cpu_type));
-	Bfile_WriteFile_OS(hFile, &mbc, sizeof(mbc_state));
+	if (writeOk && Bfile_WriteFile_OS(hFile, &cpu, sizeof(cpu_type)) < 0) writeOk = false;
+	if (writeOk && Bfile_WriteFile_OS(hFile, &mbc, sizeof(mbc_state)) < 0) writeOk = false;
 
-	if (cgb.isCGB) {
-		Bfile_WriteFile_OS(hFile, &cgb, sizeof(cgb_type));
+	if (writeOk && cgb.isCGB) {
+		if (Bfile_WriteFile_OS(hFile, &cgb, sizeof(cgb_type)) < 0) writeOk = false;
 	}
 
 	// write various work rams
-	Bfile_WriteFile_OS(hFile, &wram_perm[0], sizeof(wram_perm));
-	Bfile_WriteFile_OS(hFile, &wram_gb[0], sizeof(wram_gb));
+	if (writeOk && Bfile_WriteFile_OS(hFile, &wram_perm[0], sizeof(wram_perm)) < 0) writeOk = false;
+	if (writeOk && Bfile_WriteFile_OS(hFile, &wram_gb[0], sizeof(wram_gb)) < 0) writeOk = false;
 
-	if (cgb.isCGB) {
+	if (writeOk && cgb.isCGB) {
 		for (int i = 0; i < 6; i++) {
-			Bfile_WriteFile_OS(hFile, cgb_wram[i]->data, 0x1000);
+			if (!cgb_wram[i] || Bfile_WriteFile_OS(hFile, cgb_wram[i]->data, 0x1000) < 0) {
+				writeOk = false;
+				break;
+			}
 		}
 	}
 
 	// video RAM
-	if (cgb.isCGB) {
-		Bfile_WriteFile_OS(hFile, &vram[0], 0x4000);
-	} else {
-		Bfile_WriteFile_OS(hFile, &vram[0], 0x2000);
+	if (writeOk) {
+		if (cgb.isCGB) {
+			if (Bfile_WriteFile_OS(hFile, &vram[0], 0x4000) < 0) writeOk = false;
+		} else {
+			if (Bfile_WriteFile_OS(hFile, &vram[0], 0x2000) < 0) writeOk = false;
+		}
 	}
 
-	Bfile_WriteFile_OS(hFile, &oam[0], sizeof(oam));
+	if (writeOk && Bfile_WriteFile_OS(hFile, &oam[0], sizeof(oam)) < 0) writeOk = false;
 
 #if SAVE_STATE_SRAM
 	// only write sram for small ram sizes
-	if (RAMSize <= 8 * 1024) {
-		Bfile_WriteFile_OS(hFile, &sram[0], RAMSize);
+	if (writeOk && RAMSize <= 8 * 1024) {
+		if (Bfile_WriteFile_OS(hFile, &sram[0], RAMSize) < 0) writeOk = false;
 	}
 #endif
 
 #if TARGET_WINSIM
-	int amountWritten = Bfile_TellFile_OS(hFile);
-	DebugAssert(amountWritten == spaceNeeded);
+	if (writeOk) {
+		int amountWritten = Bfile_TellFile_OS(hFile);
+		DebugAssert(amountWritten == spaceNeeded);
+	}
 #endif
 
 	// done!
 	Bfile_CloseFile_OS(hFile);
 
-	CompatSwaps();
+	CompatSwapsState(cpu, mbc, cgb, cgb.isCGB != 0);
 
+	if (!writeOk) {
+		Bfile_DeleteEntry(pFile);
+	}
 
 	mbcFileUpdate();
 
-	screens[curScreen]->postStateChange();
+	if (curScreen >= 0 && curScreen < 6 && screens[curScreen]) {
+		screens[curScreen]->postStateChange();
+	}
 }
 
 bool emulator_type::loadState() {
+	if (mbc.romFile < 0 || !vram) {
+		return false;
+	}
+
 #if !TARGET_WINSIM
 	// flush DMA before making OS calls
 	DmaWaitNext();
 	REG_TMU_TSTR &= ~(1 << 1);
 #endif
+
+	if (isStorageLockedSafe()) {
+		mbcFileUpdate();
+		return false;
+	}
 
 	// calculate space needed for state
 	unsigned int RAMSize;
@@ -406,62 +494,113 @@ bool emulator_type::loadState() {
 
 	// read checksum and check it
 	unsigned char checkSum[4];
-	Bfile_ReadFile_OS(hFile, &checkSum[0], 4, -1);
-	if (checkSum[0] != cart[0x14E] || checkSum[1] != cart[0x14F]) {
+	if (Bfile_ReadFile_OS(hFile, &checkSum[0], 4, -1) != 4 ||
+		checkSum[0] != cart[0x14E] || checkSum[1] != cart[0x14F]) {
 		// different ROM somehow
 		Bfile_CloseFile_OS(hFile);
 		mbcFileUpdate();
 		return false;
 	}
 
+	bool wasCGB = cgb.isCGB != 0;
+	cpu_type tmpCpu;
+	mbc_state tmpMbc;
+	cgb_type tmpCgb;
+	memset(&tmpCgb, 0, sizeof(tmpCgb));
+
+	if (Bfile_ReadFile_OS(hFile, &tmpCpu, sizeof(cpu_type), -1) != (int)sizeof(cpu_type) ||
+		Bfile_ReadFile_OS(hFile, &tmpMbc, sizeof(mbc_state), -1) != (int)sizeof(mbc_state) ||
+		(wasCGB && Bfile_ReadFile_OS(hFile, &tmpCgb, sizeof(cgb_type), -1) != (int)sizeof(cgb_type))) {
+		Bfile_CloseFile_OS(hFile);
+		mbcFileUpdate();
+		return false;
+	}
+
+	CompatSwapsState(tmpCpu, tmpMbc, tmpCgb, wasCGB);
+
 	// switch back to normal speed before continuing (cgb state loading expects it)
 	if (cgb.isCGB && cgb.isDouble) {
 		cgbSpeedSwitch();
 	}
 
-	// write cpu and mbc state (preserve host file handle, compression flag, and CGB hardware mode)
-	int romFile = mbc.romFile;
-	int compressed = mbc.compressed;
-	unsigned char wasCGB = cgb.isCGB;
-	Bfile_ReadFile_OS(hFile, &cpu, sizeof(cpu_type), -1);
-	Bfile_ReadFile_OS(hFile, &mbc, sizeof(mbc_state), -1);
-	mbc.romFile = romFile;
-	mbc.compressed = compressed;
+	// preserve ROM-intrinsic mbc fields
+	tmpMbc.romFile = mbc.romFile;
+	tmpMbc.compressed = mbc.compressed;
+	tmpMbc.type = mbc.type;
+	tmpMbc.ramType = mbc.ramType;
+	tmpMbc.numRomBanks = mbc.numRomBanks;
+	tmpMbc.numRamBanks = mbc.numRamBanks;
+	tmpMbc.batteryBacked = mbc.batteryBacked;
+	tmpMbc.rumblePack = mbc.rumblePack;
+
+	if (tmpMbc.numRomBanks > 0 && tmpMbc.romBank >= tmpMbc.numRomBanks) {
+		tmpMbc.romBank %= tmpMbc.numRomBanks;
+	}
+	if (tmpMbc.numRamBanks > 0 && tmpMbc.ramBank >= tmpMbc.numRamBanks) {
+		tmpMbc.ramBank %= tmpMbc.numRamBanks;
+	}
+	tmpMbc.bankMode &= 1;
+	tmpMbc.sramEnabled = tmpMbc.sramEnabled ? 1 : 0;
 
 	if (wasCGB) {
-		Bfile_ReadFile_OS(hFile, &cgb, sizeof(cgb_type), -1);
-		cgb.isCGB = wasCGB;
+		tmpCgb.isCGB = 1;
+		tmpCgb.isDouble = tmpCgb.isDouble ? 1 : 0;
+		tmpCgb.hblankDmaActive = tmpCgb.hblankDmaActive ? 1 : 0;
+		tmpCgb.dirtyPalette = 1;
+		if (tmpCgb.selectedWRAM < 1 || tmpCgb.selectedWRAM > 7) {
+			tmpCgb.selectedWRAM = 1;
+		}
+		tmpCgb.selectedVRAM &= 1;
+		tmpCgb.dmaSrc &= 0xFFF0;
+		tmpCgb.dmaDest = 0x8000 | (tmpCgb.dmaDest & 0x1FF0);
+		if (tmpCgb.dmaLeft > 0x800) {
+			tmpCgb.dmaLeft = 0;
+		}
+		tmpCgb.curPalTarget &= 0x3F;
 	}
 
-	CompatSwaps();
+	// commit validated state
+	cpu = tmpCpu;
+	mbc = tmpMbc;
+	if (wasCGB) {
+		cgb = tmpCgb;
+	}
 
-	// write various work rams
-	Bfile_ReadFile_OS(hFile, &wram_perm[0], sizeof(wram_perm), -1);
-	Bfile_ReadFile_OS(hFile, &wram_gb[0], sizeof(wram_gb), -1);
+	// read various work rams
+	bool readOk = true;
+	if (Bfile_ReadFile_OS(hFile, &wram_perm[0], sizeof(wram_perm), -1) != (int)sizeof(wram_perm)) readOk = false;
+	if (readOk && Bfile_ReadFile_OS(hFile, &wram_gb[0], sizeof(wram_gb), -1) != (int)sizeof(wram_gb)) readOk = false;
 
-	if (cgb.isCGB) {
+	if (readOk && cgb.isCGB) {
 		for (int i = 0; i < 6; i++) {
-			Bfile_ReadFile_OS(hFile, cgb_wram[i]->data, 0x1000, -1);
+			if (!cgb_wram[i] || Bfile_ReadFile_OS(hFile, cgb_wram[i]->data, 0x1000, -1) != 0x1000) {
+				readOk = false;
+				break;
+			}
 		}
 	}
 
 	// video RAM
-	if (cgb.isCGB) {
-		Bfile_ReadFile_OS(hFile, &vram[0], 0x4000, -1);
-	} else {
-		Bfile_ReadFile_OS(hFile, &vram[0], 0x2000, -1);
+	if (readOk) {
+		if (cgb.isCGB) {
+			if (Bfile_ReadFile_OS(hFile, &vram[0], 0x4000, -1) != 0x4000) readOk = false;
+		} else {
+			if (Bfile_ReadFile_OS(hFile, &vram[0], 0x2000, -1) != 0x2000) readOk = false;
+		}
 	}
 
-	Bfile_ReadFile_OS(hFile, &oam[0], sizeof(oam), -1);
+	if (readOk && Bfile_ReadFile_OS(hFile, &oam[0], sizeof(oam), -1) != (int)sizeof(oam)) readOk = false;
 
 #if SAVE_STATE_SRAM
-	// only write sram for small ram sizes
-	if (RAMSize <= 8 * 1024) {
-		Bfile_ReadFile_OS(hFile, &sram[0], RAMSize, -1);
+	// only read sram for small ram sizes
+	if (readOk && RAMSize <= 8 * 1024) {
+		if (Bfile_ReadFile_OS(hFile, &sram[0], RAMSize, -1) != (int)RAMSize) readOk = false;
 	}
 #endif
 
 	Bfile_CloseFile_OS(hFile);
+
+	cpuResetRuntimeState();
 
 	// memory bus controller has to invalidate some stuff, etc
 	mbcOnStateLoad();
@@ -477,7 +616,12 @@ bool emulator_type::loadState() {
 		resolveDMGOBJ1Palette();
 	}
 
-	screens[curScreen]->postStateChange();
+	gpuSyncAfterStateLoad();
+	sndResetSync();
 
-	return true;
+	if (curScreen >= 0 && curScreen < 6 && screens[curScreen]) {
+		screens[curScreen]->postStateChange();
+	}
+
+	return readOk;
 }

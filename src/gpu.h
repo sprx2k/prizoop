@@ -55,10 +55,12 @@ struct sprite_type {
 extern void(*gpuStep)(void);
 
 // different gpu steps based on LCD status
+extern void stepLCDOff(void);
 extern void stepLCDOn_OAM(void);
 extern void stepLCDOn_VRAM(void);
 extern void stepLCDOn_HBLANK(void);
 extern void stepLCDOn_VBLANK(void);
+extern void gpuSyncAfterStateLoad(void);
 
 // shared color palette (the colors are two pixels wide to make stretching code faster)
 extern unsigned int ppuPalette[64];
@@ -66,6 +68,7 @@ extern unsigned int ppuPalette[64];
 void hblank(void);
 
 void enablePausePreview();
+bool isPausePreviewPending();
 
 extern unsigned int framecounter;
 

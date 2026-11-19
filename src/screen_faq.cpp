@@ -2,13 +2,18 @@
 
 #include "platform.h"
 #include "screen_faq.h"
+#include "rom.h"
 #include "exam_mode.h"
 #include "calctype/fonts/consolas_intl/consolas_intl.h"
 
 void screen_faq::setup() {
 	faqHandle = -1;
-	textBuffer = 0;
+	faqSize = 0;
+	readOffset = 0;
+	x = 0;
 	textOffset = 0;
+	textSize = 0;
+	textBuffer = NULL;
 }
 
 static unsigned char hashString(const char* str) {
@@ -24,9 +29,14 @@ void screen_faq::select() {
 	ResolveBG(bg_faq);
 
 	textOffset = 0;
+	textSize = 0;
+	readOffset = 0;
+	x = 0;
 
-	if (isStorageLockedOrExamMode()) {
+	if (isStorageLockedSafe()) {
 		Print(10, 10, "Access denied: Exam Mode / Storage locked.", false);
+		DrawFrame(0);
+		Bdisp_PutDisp_DD();
 		return;
 	}
 
@@ -40,6 +50,8 @@ void screen_faq::select() {
 
 	if (faqHandle < 0) {
 		Print(10, 10, "No .txt file found for this rom.", false);
+		DrawFrame(0);
+		Bdisp_PutDisp_DD();
 	}
 }
 
@@ -48,6 +60,7 @@ void screen_faq::deselect() {
 		free(textBuffer);
 		textBuffer = 0;
 	}
+	textSize = 0;
 
 	if (faqHandle >= 0) {
 		Bfile_CloseFile_OS(faqHandle);
@@ -88,7 +101,7 @@ void screen_faq::loadFAQ() {
 		return;
 	}
 
-	if (textOffset > faqSize || textOffset < 0) {
+	if (textOffset >= faqSize || textOffset < 0) {
 		textOffset = 0;
 	}
 	readOffset = 0;
@@ -98,47 +111,61 @@ void screen_faq::loadFAQ() {
 }
 
 void screen_faq::draw() {
-	ResolveBG(bg_faq);
-
-	int curTextPos = readOffset;
-
-	for (int y = 1; y + consolas_intl.height < 216 && curTextPos < textSize; y += consolas_intl.height) {
-		const int lineSize = 384 / 5;
-		char bufToDraw[lineSize + 1];
-		bool skipLine = false;
-		if (x) {
-			for (int c = 0; c < x; c++) {
-				if (curTextPos + c >= textSize || textBuffer[curTextPos + c] == '\n') {
-					skipLine = true;
-					break;
-				}
-			}
-		}
-		if (!skipLine && curTextPos + x < textSize) {
-			int copyLen = min(lineSize, textSize - (curTextPos + x));
-			memcpy(bufToDraw, textBuffer + curTextPos + x, copyLen);
-			bufToDraw[copyLen] = '\0';
-			for (int c = 0; c < copyLen; c++) {
-				if (bufToDraw[c] == '\n') {
-					bufToDraw[c] = 0;
-					break;
-				}
-			}
-
-			CalcType_Draw(&consolas_intl, bufToDraw, 2, y, COLOR_WHITE, 0, 0);
-		}
-		
-		// go to next line
-		do {
-			curTextPos++;
-		} while (curTextPos < textSize && textBuffer[curTextPos-1] != '\n');
+	if (!textBuffer || textSize <= 0) {
+		return;
 	}
 
-	// move down when we need to
-	if (textOffset + textSize != faqSize && curTextPos >= textSize && readOffset > 2048) {
-		readText(textOffset + 2048);
-		readOffset -= 2048;
-		draw();
+	for (int iter = 0; iter < 4; iter++) {
+		if (readOffset < 0) readOffset = 0;
+		if (readOffset > textSize) readOffset = textSize;
+
+		ResolveBG(bg_faq);
+
+		int curTextPos = readOffset;
+
+		for (int y = 1; y + consolas_intl.height < 216 && curTextPos < textSize; y += consolas_intl.height) {
+			const int lineSize = 384 / 5;
+			char bufToDraw[lineSize + 1];
+			bool skipLine = false;
+			if (x) {
+				for (int c = 0; c < x; c++) {
+					if (curTextPos + c >= textSize || textBuffer[curTextPos + c] == '\n') {
+						skipLine = true;
+						break;
+					}
+				}
+			}
+			if (!skipLine && curTextPos + x < textSize) {
+				int copyLen = min(lineSize, textSize - (curTextPos + x));
+				memcpy(bufToDraw, textBuffer + curTextPos + x, copyLen);
+				bufToDraw[copyLen] = '\0';
+				for (int c = 0; c < copyLen; c++) {
+					if (bufToDraw[c] == '\n') {
+						bufToDraw[c] = 0;
+						break;
+					}
+				}
+
+				CalcType_Draw(&consolas_intl, bufToDraw, 2, y, COLOR_WHITE, 0, 0);
+			}
+			
+			// go to next line
+			do {
+				curTextPos++;
+			} while (curTextPos < textSize && textBuffer[curTextPos - 1] != '\n');
+		}
+
+		// move down when we need to
+		if (textOffset + textSize < faqSize && curTextPos >= textSize && readOffset > 2048) {
+			readText(textOffset + 2048);
+			readOffset -= 2048;
+			if (readOffset < 0) readOffset = 0;
+			if (!textBuffer || textSize <= 0) {
+				break;
+			}
+			continue;
+		}
+		break;
 	}
 }
 
@@ -167,7 +194,7 @@ void screen_faq::readText(int bufferPos) {
 }
 
 void screen_faq::handleDown() {
-	if (faqHandle < 0) {
+	if (faqHandle < 0 || !textBuffer || textSize <= 0) {
 		return;
 	}
 
@@ -185,28 +212,31 @@ void screen_faq::handleDown() {
 
 
 void screen_faq::handleUp() {
-	if (faqHandle < 0) {
+	if (faqHandle < 0 || !textBuffer || textSize <= 0) {
 		return;
 	}
 
 	x = 0;
 
-	// go to previous line if possible (twice)
-	for (int i = 0; i < 2; i++) {
-		if (readOffset) {
+	// go to previous line if possible (twice), reloading at most one previous chunk
+	int remaining = 2;
+	bool reloaded = false;
+	while (remaining > 0) {
+		if (readOffset > 0) {
 			do {
 				readOffset--;
-			} while (readOffset > 0 && textBuffer[readOffset-1] != '\n');
-		}
-	}
-
-	if (!readOffset) {
-		if (textOffset > 0) {
+			} while (readOffset > 0 && textBuffer[readOffset - 1] != '\n');
+			remaining--;
+		} else if (!reloaded && textOffset > 0) {
 			int newOffset = max(textOffset - 2048, 0);
 			readOffset = textOffset - newOffset;
 			readText(newOffset);
-			handleUp();
-			return;
+			reloaded = true;
+			if (!textBuffer || textSize <= 0) {
+				return;
+			}
+		} else {
+			break;
 		}
 	}
 
@@ -214,7 +244,7 @@ void screen_faq::handleUp() {
 }
 
 void screen_faq::handleRight() {
-	if (faqHandle < 0) {
+	if (faqHandle < 0 || !textBuffer || textSize <= 0) {
 		return;
 	}
 
@@ -226,7 +256,7 @@ void screen_faq::handleRight() {
 }
 
 void screen_faq::handleLeft() {
-	if (faqHandle < 0) {
+	if (faqHandle < 0 || !textBuffer || textSize <= 0) {
 		return;
 	}
 

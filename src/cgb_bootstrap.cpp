@@ -8,7 +8,7 @@ struct cgbEntry {
 	unsigned short palette[12];
 };
 
-cgbEntry entries[] = {
+static const cgbEntry entries[] = {
 	{ 0xff, 0x00, { 0xffff, 0xfce0, 0xf800, 0x0000, 0xffff, 0xfce0, 0xf800, 0x0000, 0xffff, 0xfce0, 0xf800, 0x0000 } },
 	{ 0x71, 0x00, { 0xffff, 0xfce0, 0xf800, 0x0000, 0xffff, 0xfce0, 0xf800, 0x0000, 0xffff, 0xfce0, 0xf800, 0x0000 } },
 	{ 0xdb, 0x00, { 0xffff, 0xffe0, 0xf800, 0x0000, 0xffff, 0xffe0, 0xf800, 0x0000, 0xffff, 0xffe0, 0xf800, 0x0000 } },
@@ -120,7 +120,7 @@ bool getCGBTableEntry(unsigned char* romInternalName, unsigned int* allPalettes)
 				// won't find a better one
 				best = j;
 				break;
-			} else if (best == -1 || entries[j].disamb == 0) {
+			} else if (entries[j].disamb == 0 && best == -1) {
 				best = j;
 			}
 		}
@@ -128,7 +128,8 @@ bool getCGBTableEntry(unsigned char* romInternalName, unsigned int* allPalettes)
 
 	if (best != -1) {
 		for (int i = 0; i < 12; i++) {
-			allPalettes[i] = entries[best].palette[i] | (entries[best].palette[i] << 16);
+			unsigned int pal = entries[best].palette[i];
+			allPalettes[i] = pal | (pal << 16);
 		}
 		return true;
 	}

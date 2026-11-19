@@ -1,9 +1,12 @@
 #ifndef PRIZOOP_CONFIG
 #define PRIZOOP_CONFIG
 
-#define cg 0
-#define cw 1
-#define PLATFORM @PLATFORM@
-#define _(CG,CW) (PLATFORM == cg ? CG : CW)
+#define PRIZOOP_PLATFORM_cg 0
+#define PRIZOOP_PLATFORM_cw 1
+#define PRIZOOP_CAT_(a, b) a##b
+#define PRIZOOP_CAT(a, b) PRIZOOP_CAT_(a, b)
+#define PRIZOOP_PLATFORM PRIZOOP_CAT(PRIZOOP_PLATFORM_, @PLATFORM@)
+#define PRIZOOP_IS_CW (PRIZOOP_PLATFORM == PRIZOOP_PLATFORM_cw)
+#define PRIZOOP_SEL(CG, CW) (PRIZOOP_IS_CW ? (CW) : (CG))
 
 #endif

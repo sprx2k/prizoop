@@ -31,8 +31,19 @@ extern "C" {
 #define RESTRICT __restrict__
 #include "fxcg_registers.h"
 #include "fxcg/heap.h"
+static inline void* prizoop_calloc(size_t elements, size_t elementSize) {
+	if (elements != 0 && elementSize > ((size_t)-1) / elements) {
+		return NULL;
+	}
+	size_t total = elements * elementSize;
+	void* ptr = sys_malloc((int)total);
+	if (ptr) {
+		memset(ptr, 0, total);
+	}
+	return ptr;
+}
 #define malloc sys_malloc
-#define calloc sys_calloc
+#define calloc prizoop_calloc
 #define realloc sys_realloc
 #define free sys_free
 
@@ -55,7 +66,7 @@ static inline void EndianSwap(unsigned int& i) {
 
 // compile time assert, will throw negative subscript error
 #ifdef __GNUC__
-#define CT_ASSERT(cond) static_assert(cond);
+#define CT_ASSERT(cond) static_assert(cond, #cond);
 #else
 #define CT_ASSERT(cond) typedef char check##__LINE__ [(cond) ? 1 : -1];
 #endif
@@ -72,4 +83,5 @@ static inline void EndianSwap(unsigned int& i) {
 
 extern void ScreenPrint(char* buffer);
 extern void reset_printf();
-#define printf(...) { char buffer[256]; memset(buffer, 0, 256); sprintf(buffer, __VA_ARGS__); ScreenPrint(buffer); }
+extern void prizoop_printf(const char* fmt, ...);
+#define printf prizoop_printf

@@ -30,7 +30,10 @@ bool invalidFrame = false;
 
 void stepLCDOff(void) {
 	if (cpu.memory.LCDC_ctl & 0x80) {
-		//  LCD was re-enabled
+		// LCD was re-enabled
+		cpu.memory.LY_lcdline = 0;
+		SET_LCDC_MODE(GPU_MODE_OAM);
+		windowLineOffset = 0;
 		gpuStep = stepLCDOn_OAM;
 		invalidFrame = true;
 		cpu.gpuTick = cpu.clocks + gpuTimes[GPU_MODE_OAM];
@@ -42,6 +45,14 @@ void stepLCDOff(void) {
 
 		// good time to refresh the keys
 		refreshKeys(true);
+
+		// complete pause preview immediately if requested while LCD is off
+		if (isPausePreviewPending()) {
+			memset(emulator.pausePreview, 0, sizeof(emulator.pausePreview));
+			if (drawFramebuffer) {
+				drawFramebuffer();
+			}
+		}
 
 		// run inactive sound logic if sound disabled
 		if (!emulator.settings.sound) {
@@ -144,11 +155,12 @@ void stepLCDOn_HBLANK(void) {
 			}
 			cpu.memory.IF_intflag |= INTERRUPTS_VBLANK;
 
-			// joypad interrupt here (though I don't think many games used it)
-			if (!cgb.isCGB && (cpu.halted || cpu.stopped || cpu.memory.IE_intenable & INTERRUPTS_JOYPAD)) {
+			// joypad interrupt here (both DMG and CGB)
+			if (cpu.halted || cpu.stopped || (cpu.memory.IE_intenable & INTERRUPTS_JOYPAD)) {
 				unsigned char jPad = readByteSpecial(0xFF00);
 				if ((jPad & 0x0F) != 0x0F) {
 					cpu.memory.IF_intflag |= INTERRUPTS_JOYPAD;
+					cpu.stopped = 0;
 				}
 			}
 
@@ -216,7 +228,9 @@ void stepLCDOn_VBLANK(void) {
 						renderBlankScanline();
 					}
 					cpu.memory.LY_lcdline = 0;
-					drawFramebuffer();
+					if (drawFramebuffer) {
+						drawFramebuffer();
+					}
 
 					// send one hblank dma off if there is one
 					if (cgb.isCGB && cgb.hblankDmaActive) {
@@ -240,6 +254,32 @@ void stepLCDOn_VBLANK(void) {
 				cpu.gpuTick += gpuTimes[GPU_MODE_VBLANK];
 				break;
 		}
+	}
+}
+
+void gpuSyncAfterStateLoad(void) {
+	invalidFrame = false;
+	windowLineOffset = 0;
+
+	if (!(cpu.memory.LCDC_ctl & 0x80)) {
+		gpuStep = stepLCDOff;
+		return;
+	}
+
+	switch (GET_LCDC_MODE()) {
+		case GPU_MODE_HBLANK:
+			gpuStep = stepLCDOn_HBLANK;
+			break;
+		case GPU_MODE_VBLANK:
+			gpuStep = stepLCDOn_VBLANK;
+			break;
+		case GPU_MODE_VRAM:
+			gpuStep = stepLCDOn_VRAM;
+			break;
+		case GPU_MODE_OAM:
+		default:
+			gpuStep = stepLCDOn_OAM;
+			break;
 	}
 }
 

@@ -1,5 +1,6 @@
 #include "exam_mode.h"
 #include "platform.h"
+#include "config.h"
 
 namespace {
 struct exam_find_info_t {
@@ -38,6 +39,7 @@ bool isStorageLockedOrExamMode() {
 	// Any normal installation running Prizoop has at least prizoop_*.g3a (and mpm.bin
 	// on fx-CG100) in root storage memory (\\fls0\). If neither wildcard returns any
 	// entry, storage memory access is restricted (e.g., Examination Mode).
+	// Note: callers holding an open Bfile handle should close it before probing.
 	if (canAccessStoragePattern("\\\\fls0\\*.*")) {
 		return false;
 	}
@@ -71,15 +73,22 @@ void showExamModeBlockedScreen(bool waitForKey) {
 	if (waitForKey) {
 		x = 16;
 		y = 164;
-		PrintMini(&x, &y, "Press any key to exit...", 0x02, 0xffffffff, 0, 0, COLOR_YELLOW, COLOR_BLACK, 1, 0);
+		PrintMini(&x, &y, PRIZOOP_SEL("Press MENU to exit...", "Press any key to exit..."), 0x02, 0xffffffff, 0, 0, COLOR_YELLOW, COLOR_BLACK, 1, 0);
 	}
 
 	DrawFrame(0x0000);
 	Bdisp_PutDisp_DD();
 
 	if (waitForKey) {
+#if PRIZOOP_IS_CW
 		int key = 0;
 		GetKey(&key);
+#else
+		for (;;) {
+			int key = 0;
+			GetKey(&key);
+		}
+#endif
 	}
 #else
 	(void)waitForKey;

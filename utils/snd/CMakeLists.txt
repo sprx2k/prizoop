@@ -14,4 +14,5 @@ target_compile_options(snd PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-std=c99>
   $<$<COMPILE_LANGUAGE:CXX>:-std=c++11 -fpermissive -fno-rtti -fno-exceptions
     -fno-threadsafe-statics -fno-use-cxa-get-exception-ptr>
-  -Os -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch)
+  -Os -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch
+  -ffunction-sections -fdata-sections)

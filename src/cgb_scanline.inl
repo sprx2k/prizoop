@@ -11,7 +11,8 @@
 template<bool priorityBG>
 inline bool RenderCGBScanline_BG() {
 	bool hasPriority = false;
-	unsigned char priorityLine[8];
+	unsigned char priorityLine[8] ALIGN(4);
+	const bool bgMasterPriority = (cpu.memory.LCDC_ctl & LCDC_BGENABLE) != 0;
 
 	// background/window
 	{
@@ -19,6 +20,18 @@ inline bool RenderCGBScanline_BG() {
 
 		// tile offset and palette shared for window
 		const int tileOffset = (cpu.memory.LCDC_ctl & LCDC_TILESET) ? 0 : 256;
+
+		// determine whether the window covers part of this scanline (for Pass 2 BG clipping)
+		int winClipLimit = 168;
+		if (priorityBG && (cpu.memory.LCDC_ctl & LCDC_WINDOWENABLE)) {
+			int winY = cpu.memory.LY_lcdline - cpu.memory.WY_windowy + windowLineOffset;
+			int winX = cpu.memory.WX_windowx;
+			if (winX <= 166 && winY >= 0 && winY < 256) {
+				int limit = winX - 7 + (int)(cpu.memory.SCX_bgscrollx & 7);
+				if (limit < 0) limit = 0;
+				winClipLimit = limit;
+			}
+		}
 
 		// draw background
 		{
@@ -36,10 +49,15 @@ inline bool RenderCGBScanline_BG() {
 			lineBuffer[0] = cpu.memory.SCX_bgscrollx & 7;
 
 			for (i = 0; i < 168; i += 8) {
+				if (priorityBG && i >= winClipLimit) {
+					break;
+				}
+
 				int lineOffset = ((unsigned char)(cpu.memory.SCX_bgscrollx + i)) >> 3;
 
 				int attr = vram[mapOffset + lineOffset + 0x2000];
-				if (((attr & 0x80) == 0) == priorityBG) {
+				bool isTilePriority = bgMasterPriority && ((attr & 0x80) != 0);
+				if (isTilePriority != priorityBG) {
 					if (!priorityBG) {
 						hasPriority = true;
 						int paletteMask = (attr & 0x07) << 4;
@@ -74,14 +92,21 @@ inline bool RenderCGBScanline_BG() {
 						resolveTileRow<false>(priorityLine, tileRow);
 					}
 
-					if (priorityLine[0]) scanline[0] = priorityLine[0] | paletteMask;
-					if (priorityLine[1]) scanline[1] = priorityLine[1] | paletteMask;
-					if (priorityLine[2]) scanline[2] = priorityLine[2] | paletteMask;
-					if (priorityLine[3]) scanline[3] = priorityLine[3] | paletteMask;
-					if (priorityLine[4]) scanline[4] = priorityLine[4] | paletteMask;
-					if (priorityLine[5]) scanline[5] = priorityLine[5] | paletteMask;
-					if (priorityLine[6]) scanline[6] = priorityLine[6] | paletteMask;
-					if (priorityLine[7]) scanline[7] = priorityLine[7] | paletteMask;
+					if (i + 8 <= winClipLimit) {
+						if (priorityLine[0]) scanline[0] = priorityLine[0] | paletteMask;
+						if (priorityLine[1]) scanline[1] = priorityLine[1] | paletteMask;
+						if (priorityLine[2]) scanline[2] = priorityLine[2] | paletteMask;
+						if (priorityLine[3]) scanline[3] = priorityLine[3] | paletteMask;
+						if (priorityLine[4]) scanline[4] = priorityLine[4] | paletteMask;
+						if (priorityLine[5]) scanline[5] = priorityLine[5] | paletteMask;
+						if (priorityLine[6]) scanline[6] = priorityLine[6] | paletteMask;
+						if (priorityLine[7]) scanline[7] = priorityLine[7] | paletteMask;
+					} else {
+						int rem = winClipLimit - i;
+						for (int p = 0; p < rem; p++) {
+							if (priorityLine[p]) scanline[p] = priorityLine[p] | paletteMask;
+						}
+					}
 				} else {
 					// bit 5 is hflip
 					if (attr & 0x20) {
@@ -101,7 +126,7 @@ inline bool RenderCGBScanline_BG() {
 			int wx = cpu.memory.WX_windowx;
 			int y = cpu.memory.LY_lcdline - cpu.memory.WY_windowy + windowLineOffset;
 
-			if (wx <= 166 && y >= 0) {
+			if (wx <= 166 && y >= 0 && y < 256) {
 				// select map offset row
 				int mapOffset = (cpu.memory.LCDC_ctl & LCDC_WINDOWTILEMAP) ? 0x1c00 : 0x1800;
 				mapOffset += (y >> 3) << 5;
@@ -119,7 +144,8 @@ inline bool RenderCGBScanline_BG() {
 					lineOffset = lineOffset + 1;
 
 					int attr = vram[mapOffset + lineOffset + 0x2000];
-					if (((attr & 0x80) == 0) == priorityBG) {
+					bool isTilePriority = bgMasterPriority && ((attr & 0x80) != 0);
+					if (isTilePriority != priorityBG) {
 						if (!priorityBG) {
 							hasPriority = true;
 							int paletteMask = (attr & 0x07) << 4;
@@ -231,7 +257,7 @@ inline void RenderCGBScanline() {
 					unsigned int tileRow = *((unsigned short*)&vram[tileIndex]);
 					ShortSwap(tileRow);
 
-					unsigned char colors[8];
+					unsigned char colors[8] ALIGN(4);
 					if (!OAM_ATTR_XFLIP(sprite->attr)) {
 						resolveTileRow<false>(colors, tileRow);
 					} else {

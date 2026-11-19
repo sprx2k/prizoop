@@ -1,6 +1,7 @@
 #pragma once
 
 void SetupDisplayDriver(char withFrameskip);
+void TeardownDisplayDriver(void);
 void SetupDisplayPalette();
 
 void DmaWaitNext(void);

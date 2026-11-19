@@ -10,4 +10,5 @@ target_include_directories(ptune2_simple
 
 target_compile_options(ptune2_simple PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-std=c99>
-  -Os -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch)
+  -Os -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch
+  -ffunction-sections -fdata-sections)

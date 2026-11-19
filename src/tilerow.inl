@@ -32,17 +32,16 @@ FORCE_INLINE void BitsToScanline_Palette(unsigned char* scanline, unsigned int b
 
 // unsafe alignment (slower!)
 FORCE_INLINE void BitsToScanline_Unsafe(unsigned char* scanline, unsigned int bits, unsigned int palette) {
-	palette |= palette << 8;
-	palette |= palette << 16;
-	unsigned char* bitsChar = (unsigned char*) &bits;
-	scanline[0] = (bitsChar[0] & 0x0C) | palette;
-	scanline[1] = (bitsChar[1] & 0x0C) | palette;
-	scanline[2] = (bitsChar[2] & 0x0C) | palette;
-	scanline[3] = (bitsChar[3] & 0x0C) | palette;
-	scanline[4] = ((bitsChar[0] >> 2) & 0x0C) | palette;
-	scanline[5] = ((bitsChar[1] >> 2) & 0x0C) | palette;
-	scanline[6] = ((bitsChar[2] >> 2) & 0x0C) | palette;
-	scanline[7] = ((bitsChar[3] >> 2) & 0x0C) | palette;
+	unsigned char pal = (unsigned char)palette;
+	scanline[0] = (unsigned char)(((bits >> 24) & 0x0C) | pal);
+	scanline[1] = (unsigned char)(((bits >> 16) & 0x0C) | pal);
+	scanline[2] = (unsigned char)(((bits >> 8) & 0x0C) | pal);
+	scanline[3] = (unsigned char)((bits & 0x0C) | pal);
+	bits >>= 2;
+	scanline[4] = (unsigned char)(((bits >> 24) & 0x0C) | pal);
+	scanline[5] = (unsigned char)(((bits >> 16) & 0x0C) | pal);
+	scanline[6] = (unsigned char)(((bits >> 8) & 0x0C) | pal);
+	scanline[7] = (unsigned char)((bits & 0x0C) | pal);
 }
 
 #else

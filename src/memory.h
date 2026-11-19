@@ -32,7 +32,7 @@ extern unsigned char* memoryMap[256] ALIGN(256);
 // Bit 4 : for most significant memory byte, whether a read must validate the area first (switched bank)
 extern unsigned char specialMap[256] ALIGN(256);
 
-void resetMemoryMaps(bool isCGB);
+bool resetMemoryMaps(bool isCGB);
 
 void copy(unsigned short destination, unsigned short source, size_t length);
 
@@ -77,9 +77,12 @@ inline void writeByte(unsigned int address, unsigned char value) {
 	else if ((address & 0x8000) == 0) {
 		mbcWrite(address, value);
 	}
-	// else a normal byte write
+	// else a normal byte write (never corrupt shared disabledArea open-bus buffer)
 	else {
-		memoryMap[address >> 8][address & 0xFF] = value;
+		unsigned char* page = memoryMap[address >> 8];
+		if (page != disabledArea) {
+			page[address & 0xFF] = value;
+		}
 	}
 
 	// for debugging, usually compiles out

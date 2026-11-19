@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.15)
-project(prizoop LANGUAGES C CXX ASM VERSION "01.00.0000")
+project(prizoop LANGUAGES C CXX ASM VERSION "01.01.0000")
 
 set(PLATFORM "cw" CACHE STRING "Target Casio platform: cw (fx-CG100 / Graph Math+) or cg (fx-CG50)")
+if(NOT "${PLATFORM}" STREQUAL "cw" AND NOT "${PLATFORM}" STREQUAL "cg")
+  message(FATAL_ERROR "Unsupported PLATFORM='${PLATFORM}'. Must be 'cw' or 'cg'.")
+endif()
 
 include(GenerateG3A)
 
@@ -28,6 +31,7 @@ add_executable(prizoop ${SOURCES})
 
 target_compile_options(prizoop PRIVATE
   -O2 -Wall -funroll-loops -fno-trapping-math -fno-trapv -Wno-switch
+  -ffunction-sections -fdata-sections
   $<$<COMPILE_LANGUAGE:C>:-std=c99>
   $<$<COMPILE_LANGUAGE:CXX>:-std=c++11 -fpermissive -fno-rtti
     -fno-exceptions -fno-threadsafe-statics
@@ -41,9 +45,9 @@ target_link_options(prizoop PRIVATE
 
 target_link_libraries(prizoop PRIVATE
   zx7 calctype snd scope_timer ptune2_simple
-  -lsyscall-${PLATFORM} -lc -lgint-cg -lc -lopenlibm -lgcc)
+  -lsyscall-${PLATFORM} -lc -lopenlibm -lgcc)
 
-if("${FXSDK_PLATFORM_LONG}" STREQUAL fxCG50)
+if("${FXSDK_PLATFORM_LONG}" STREQUAL fxCG50 OR "${FXSDK_PLATFORM_LONG}" STREQUAL fxCG100)
   if("${PLATFORM}" STREQUAL cw)
     generate_g3a(TARGET prizoop OUTPUT "prizoop_cw.g3a"
       NAME "Prizoop" ICONS icon-uns.png icon-sel.png)

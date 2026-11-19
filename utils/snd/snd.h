@@ -35,6 +35,9 @@ void sndUpdate();
 // cleans up the platform sound system, called when emulation ends
 void sndCleanup();
 
+// resets sound timing/buffer sync after pause or state load
+void sndResetSync();
+
 // volume controls (called per 8 frames if button pressed, if platform implemented)
 void sndVolumeUp();
 void sndVolumeDown();
@@ -47,7 +50,7 @@ extern bool bSoundEnabled;
 
 #if TARGET_PRIZM
 extern unsigned int lastSoundCounter;
-#define condSoundUpdate() if (bSoundEnabled && lastSoundCounter > REG_TMU_TCNT_1) sndUpdate()
+#define condSoundUpdate() if (bSoundEnabled && ((unsigned int)(lastSoundCounter - REG_TMU_TCNT_1) >= 40U)) sndUpdate()
 #else
 #define condSoundUpdate() if (bSoundEnabled) sndUpdate()
 #endif

@@ -37,12 +37,21 @@ void sndStartup() {
 	memset(&snd, 0, sizeof(snd));
 
 	if (invFreqTable == NULL) {
-		invFreqTable = (int*)malloc(2048 * 4);
-		for (int i = 0; i < 2048; i++) {
-			int freq = max(2048 - i, 31);			// clamp to 4 KHz or so
-			int invFreqFactor = 256 * FREQ_FACTOR / freq;
-			invFreqTable[i] = invFreqFactor;
+		invFreqTable = (int*)malloc(2048 * sizeof(int));
+		if (invFreqTable) {
+			for (int i = 0; i < 2048; i++) {
+				int freq = max(2048 - i, 31);			// clamp to 4 KHz or so
+				int invFreqFactor = 256 * FREQ_FACTOR / freq;
+				invFreqTable[i] = invFreqFactor;
+			}
 		}
+	}
+}
+
+void sndShutdown() {
+	if (invFreqTable) {
+		free(invFreqTable);
+		invFreqTable = NULL;
 	}
 }
 
@@ -71,17 +80,18 @@ void sndChannelInit(int channelNum) {
 			cpu.memory.NR52_soundmast |= 0x08;							// set not out of length
 			snd.ch4EnvCounter = 0;										// reset envelope counter
 			snd.ch4Volume = ((cpu.memory.NR42_snd4env & 0xF0) >> 4);	// use initial volume
-			{
-				unsigned int seed = (cpu.clocks >> 4) & 0x7FFF;
-				if ((seed & 0x7F) == 0) seed |= 0x7F;
-				snd.ch4LFSR = (int)seed;
-			}
+			snd.ch4LFSR = 0x7FFF;
 			break;
 	}
 }
 
 // called from the platform sound system to fill a buffer based on current sound values
 void sndFrame(int* buffer, int buffSize) {
+	if (!invFreqTable) {
+		memset(buffer, 0, buffSize * sizeof(int));
+		return;
+	}
+
 	// master volume 0-14
 	int masterVol = (cpu.memory.NR50_spkvol & 0x07) + ((cpu.memory.NR50_spkvol & 0x70) >> 4);
 	int masterCtl = cpu.memory.NR52_soundmast;
@@ -139,19 +149,16 @@ void sndFrame(int* buffer, int buffSize) {
 					masterCtl &= ~0x01;
 				}
 				cpu.memory.NR11_snd1len = (cpu.memory.NR11_snd1len & 0xC0) | length;
-			} else if ((cpu.memory.NR11_snd1len & 0x3f) == 0) {
-				masterCtl &= ~0x01;
 			}
 
 			// sweep step every 2 frames
 			if (subFrame & 1) {
 				int ch1Sweep = (cpu.memory.NR10_snd1sweep & 0x70) >> 4;
-				if (ch1Sweep) {
+				int bits = cpu.memory.NR10_snd1sweep & 0x07;
+				if (ch1Sweep && bits) {
 					if (++snd.ch1SweepCounter >= ch1Sweep) {
 						// change channel 1 frequency
-
 						snd.ch1SweepCounter = 0;
-						int bits = cpu.memory.NR10_snd1sweep & 0x07;
 						if (cpu.memory.NR10_snd1sweep & 0x08) {
 							// decrease
 							freq -= (freq >> bits);
@@ -209,8 +216,6 @@ void sndFrame(int* buffer, int buffSize) {
 					masterCtl &= ~0x02;
 				}
 				cpu.memory.NR21_snd2len = (cpu.memory.NR21_snd2len & 0xC0) | length;
-			} else if ((cpu.memory.NR21_snd2len & 0x3f) == 0) {
-				masterCtl &= ~0x02;
 			}
 		} else {
 			masterCtl &= ~0x02;
@@ -225,15 +230,16 @@ void sndFrame(int* buffer, int buffSize) {
 			int vol = masterVol * 15;
 
 			int volBit = (cpu.memory.NR32_snd3vol & 0x60) >> 5;
+			int volShift = (volBit > 0) ? (volBit - 1) : 0;
 
-			// kill volume if no speakers are used or 0 bit shift is selected
+			// kill volume if no speakers are used or 0 bit shift (mute) is selected
 			vol = ((cpu.memory.NR51_chselect & 0x04) || (cpu.memory.NR51_chselect & 0x40)) && volBit ? vol : 0;
 
 			// fill our sound buffer
 			int j = sndIter;
 			for (int i = 0; i < subSize; j++, i++) {
 				int samp = ((j * invFreqFactor) >> 10) % 32;
-				buffer[i] += (vol * ((samp & 1) ? (cpu.memory.WAVE_ptr[samp / 2] & 0x0F) : ((cpu.memory.WAVE_ptr[samp / 2] & 0xF0) >> 4))) >> volBit;
+				buffer[i] += (vol * ((samp & 1) ? (cpu.memory.WAVE_ptr[samp / 2] & 0x0F) : ((cpu.memory.WAVE_ptr[samp / 2] & 0xF0) >> 4))) >> volShift;
 			}
 
 			// if length is in use, "decrement" it until sound is done
@@ -246,8 +252,6 @@ void sndFrame(int* buffer, int buffSize) {
 					masterCtl &= ~0x04;
 				}
 				cpu.memory.NR31_snd3len = length;
-			} else if (cpu.memory.NR31_snd3len == 0) {
-				masterCtl &= ~0x04;
 			}
 		} else {
 			masterCtl &= ~0x04;
@@ -271,27 +275,27 @@ void sndFrame(int* buffer, int buffSize) {
 			int j = sndIter;
 			int last = ((j * invFreqFactor) >> 8);
 			if (cpu.memory.NR43_snd4cnt & 0x08) {
-				// 7 bit shift
+				// 7-bit LFSR width mode
 				for (int i = 0; i < subSize; j++, i++) {
 					int cur = ((j * invFreqFactor) >> 8);
 					if (last != cur) {
 						int xorBit = ((snd.ch4LFSR & 0x02) >> 1) ^ (snd.ch4LFSR & 0x01);
-						snd.ch4LFSR = ((snd.ch4LFSR >> 1) & 0x7F7F) | (xorBit << 15) | (xorBit << 7);
+						snd.ch4LFSR = ((snd.ch4LFSR >> 1) & 0x3FBF) | (xorBit << 14) | (xorBit << 6);
 						last = cur;
 					}
-					buffer[i] += ((snd.ch4LFSR & 0xF) * vol);
+					buffer[i] += ((snd.ch4LFSR & 1) ? 0 : (15 * vol));
 				}
 			}
 			else {
-				// 15 bit shift
+				// 15-bit LFSR width mode
 				for (int i = 0; i < subSize; j++, i++) {
 					int cur = ((j * invFreqFactor) >> 8);
 					if (last != cur) {
 						int xorBit = ((snd.ch4LFSR & 0x02) >> 1) ^ (snd.ch4LFSR & 0x01);
-						snd.ch4LFSR = (snd.ch4LFSR >> 1) | (xorBit << 15);
+						snd.ch4LFSR = ((snd.ch4LFSR >> 1) & 0x3FFF) | (xorBit << 14);
 						last = cur;
 					}
-					buffer[i] += ((snd.ch4LFSR & 0xF) * vol);
+					buffer[i] += ((snd.ch4LFSR & 1) ? 0 : (15 * vol));
 				}
 			}
 
@@ -305,8 +309,6 @@ void sndFrame(int* buffer, int buffSize) {
 					masterCtl &= ~0x08;
 				}
 				cpu.memory.NR41_snd4len = length;
-			} else if ((cpu.memory.NR41_snd4len & 0x3f) == 0) {
-				masterCtl &= ~0x08;
 			}
 		} else {
 			masterCtl &= ~0x08;
@@ -398,19 +400,16 @@ void sndInactiveFrame() {
 			}
 			cpu.memory.NR11_snd1len = (cpu.memory.NR11_snd1len & 0xC0) | length;
 		}
-		else if ((cpu.memory.NR11_snd1len & 0x3f) == 0) {
-			masterCtl &= ~0x01;
-		}
 
 		int ch1Sweep = (cpu.memory.NR10_snd1sweep & 0x70) >> 4;
-		if (ch1Sweep) {
+		int bits = cpu.memory.NR10_snd1sweep & 0x07;
+		if (ch1Sweep && bits) {
 			snd.ch1SweepCounter += 2;
 			if (snd.ch1SweepCounter >= ch1Sweep) {
 				// change channel 1 frequency
 				int freq = (cpu.memory.NR13_snd1frqlo | ((cpu.memory.NR14_snd1ctl & 0x07) << 8));
 
 				snd.ch1SweepCounter = 0;
-				int bits = cpu.memory.NR10_snd1sweep & 0x07;
 				if (cpu.memory.NR10_snd1sweep & 0x08) {
 					// decrease
 					freq -= (freq >> bits);
@@ -450,9 +449,6 @@ void sndInactiveFrame() {
 			}
 			cpu.memory.NR21_snd2len = (cpu.memory.NR21_snd2len & 0xC0) | length;
 		}
-		else if ((cpu.memory.NR21_snd2len & 0x3f) == 0) {
-			masterCtl &= ~0x02;
-		}
 	}
 	else {
 		masterCtl &= ~0x02;
@@ -471,9 +467,6 @@ void sndInactiveFrame() {
 			}
 			cpu.memory.NR31_snd3len = length;
 		}
-		else if (cpu.memory.NR31_snd3len == 0) {
-			masterCtl &= ~0x04;
-		}
 	}
 	else {
 		masterCtl &= ~0x04;
@@ -491,9 +484,6 @@ void sndInactiveFrame() {
 				masterCtl &= ~0x08;
 			}
 			cpu.memory.NR41_snd4len = length;
-		}
-		else if ((cpu.memory.NR41_snd4len & 0x3f) == 0) {
-			masterCtl &= ~0x08;
 		}
 	}
 	else {

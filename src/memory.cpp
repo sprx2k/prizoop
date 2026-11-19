@@ -64,14 +64,14 @@ const unsigned char ioReset[0x100] = {
 //		0x77 : CGB mode unknown register (read only)
 unsigned char specialMap[256] ALIGN(256) =
 {
-	0x01, 0x00, 0x03, 0x00,  0x03, 0x03, 0x00, 0x02,  0x01, 0x01, 0x01, 0x01,  0x01, 0x01, 0x01, 0x01,
+	0x01, 0x00, 0x03, 0x00,  0x03, 0x03, 0x02, 0x03,  0x01, 0x01, 0x01, 0x01,  0x01, 0x01, 0x01, 0x03,
 	0x00, 0x00, 0x00, 0x00,  0x02, 0x00, 0x00, 0x00,  0x00, 0x02, 0x00, 0x00,  0x00, 0x00, 0x02, 0x00,
 	0x00, 0x00, 0x00, 0x02,  0x00, 0x00, 0x02, 0x00,  0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,
 
-	0x02, 0x03, 0x00, 0x00,  0x03, 0x00, 0x02, 0x02,  0x02, 0x02, 0x00, 0x02,  0x00, 0x02, 0x00, 0x02,
+	0x02, 0x03, 0x00, 0x00,  0x03, 0x02, 0x02, 0x02,  0x02, 0x02, 0x00, 0x02,  0x00, 0x02, 0x00, 0x02,
 	0x00, 0x02, 0x02, 0x02,  0x02, 0x02, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,  0x00, 0x02, 0x00, 0x02,  0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,  0x02, 0x03, 0x02, 0x03,  0x00, 0x00, 0x00, 0x00,
 	0x02, 0x00, 0x00, 0x00,  0x00, 0x00, 0x02, 0x02,  0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,
 
 	0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,
@@ -97,7 +97,7 @@ unsigned char disabledArea[0x100] ALIGN(256);
 
 unsigned char* memoryMap[256] ALIGN(256) = { 0 };
 
-void resetMemoryMaps(bool isCGB) {
+bool resetMemoryMaps(bool isCGB) {
 	// disabled RAM/ROM area should return all '1's
 	memset(disabledArea, 0xFF, sizeof(disabledArea));
 
@@ -114,14 +114,17 @@ void resetMemoryMaps(bool isCGB) {
 	// video RAM needs to be allocated
 	if (vram != NULL) {
 		free((void*)vram);
+		vram = NULL;
 	}
-	if (isCGB) {
-		vram = (unsigned char*) malloc(0x4000);
-		memset(vram, 0, 0x4000);
-	} else {
-		vram = (unsigned char*) malloc(0x2000);
-		memset(vram, 0, 0x2000);
+	const size_t vramSize = isCGB ? 0x4000 : 0x2000;
+	vram = (unsigned char*) malloc(vramSize);
+	if (vram == NULL) {
+		for (int i = 0x80; i <= 0x9f; i++) {
+			memoryMap[i] = &disabledArea[0];
+		}
+		return false;
 	}
+	memset(vram, 0, vramSize);
 
 	// first 8k of VRAM gets mapped by default
 	for (int i = 0x80; i <= 0x9f; i++) {
@@ -143,21 +146,26 @@ void resetMemoryMaps(bool isCGB) {
 	for (int i = 0xd0; i <= 0xdf; i++) {
 		memoryMap[i] = &wram_gb[(i - 0xd0) << 8];
 	}
-	// echo area of above ram
+	// echo area of above ram (0xF000-0xFDFF mirrors 0xD000-0xDDFF)
 	for (int i = 0xf0; i <= 0xfd; i++) {
-		memoryMap[i] = &wram_gb[(i - 0xe0) << 8];
+		memoryMap[i] = &wram_gb[(i - 0xf0) << 8];
 	}
 
 	// on-chip/PPU memory
 	memoryMap[0xfe] = oam;
 	memoryMap[0xff] = cpu.memory.all;	// on chip memory
+	return true;
 }
 
 void oamDMA(unsigned int sourceUpper) {
-	if (specialMap[sourceUpper] & 0x10)
-		mbcRead(sourceUpper << 8);
+	cpu.memory.DMA_dmawrite = (unsigned char)sourceUpper;
 
-	memcpy(oam, memoryMap[sourceUpper], 160);
+	// Hardware mirrors 0xE000-0xFFFF to 0xC000-0xDFFF during OAM DMA
+	unsigned int mappedUpper = (sourceUpper >= 0xE0) ? (sourceUpper - 0x20) : sourceUpper;
+	if (specialMap[mappedUpper] & 0x10)
+		mbcRead(mappedUpper << 8);
+
+	memcpy(oam, memoryMap[mappedUpper], 160);
 }
 
 unsigned char readByteSpecial(unsigned int address) {
@@ -169,14 +177,15 @@ unsigned char readByteSpecial(unsigned int address) {
 	switch (byte) {
 		case 0x00:
 		{
-			// keyboard read
+			// keyboard read (handles single or dual row selection)
+			unsigned char result = (unsigned char)(0xC0 | (cpu.memory.P1_joypad & 0x30) | 0x0F);
 			if (!(cpu.memory.P1_joypad & 0x20)) {
-				return (unsigned char)(0xc0 | keys.keys1 | 0x10);
+				result &= (unsigned char)(0xF0 | (keys.keys1 & 0x0F));
 			}
-			else if (!(cpu.memory.P1_joypad & 0x10)) {
-				return (unsigned char)(0xc0 | keys.keys2 | 0x20);
+			if (!(cpu.memory.P1_joypad & 0x10)) {
+				result &= (unsigned char)(0xF0 | (keys.keys2 & 0x0F));
 			}
-			else return 0xff;
+			return result;
 		}
 		case 0x02: {
 			// also return transfer bit as 0
@@ -190,6 +199,9 @@ unsigned char readByteSpecial(unsigned int address) {
 			updateTimer();
 			return cpu.memory.TIMA_timerctr;
 		}
+		case 0x07: {
+			return cpu.memory.TAC_timerctl | 0xF8;
+		}
 		// these are unmapped and MUST return 0xFF
 		case 0x08:
 		case 0x09:
@@ -201,6 +213,10 @@ unsigned char readByteSpecial(unsigned int address) {
 			return 0xff;
 		case 0x0f: return cpu.memory.IF_intflag | 0xE0;	// top 3 bits are always set when reading interrupt flags
 		case 0x41: return cpu.memory.STAT_lcdstatus | 0x80;	// high bit always set in STAT
+		case 0x69:
+			return cgb.isCGB ? cgb.paletteMemory[cpu.memory.BGPI_bgpalindex & 0x3F] : 0xFF;
+		case 0x6B:
+			return cgb.isCGB ? cgb.paletteMemory[64 + (cpu.memory.OBPI_objpalindex & 0x3F)] : 0xFF;
 		default:
 			return cpu.memory.all[byte];
 	}
@@ -219,15 +235,23 @@ void writeByteSpecial(unsigned int address, unsigned char value) {
 			}
 			break;
 		case 0x04:
-			// always resets DIV when written to
+			// always resets DIV and internal divider sub-ticks when written to
 			cpu.div = 0;
 			cpu.divBase = cpu.clocks;
+			resetTimerSubTicks();
 			break;
 		case 0x05:
 			writeTIMA(value);
 			break;
+		case 0x06:
+			updateTimer();
+			cpu.memory.TMA_timermodulo = value;
+			break;
 		case 0x07:
 			writeTAC(value);
+			break;
+		case 0x0f:
+			cpu.memory.IF_intflag = value & 0x1F;
 			break;
 		case 0x14:
 			if (value & 0x80) {
@@ -281,12 +305,25 @@ void writeByteSpecial(unsigned int address, unsigned char value) {
 			break;
 		case 0x41:
 			cpu.memory.STAT_lcdstatus = (value & 0x78) | (cpu.memory.STAT_lcdstatus & 0x7);
-			// This may be a DMG only thing?
-			if ((GET_LCDC_MODE() == GPU_MODE_HBLANK || GET_LCDC_MODE() == GPU_MODE_VBLANK) && (cpu.memory.LCDC_ctl & 0x80)) {
+			// DMG STAT-write quirk only applies on DMG hardware
+			if (!cgb.isCGB && (GET_LCDC_MODE() == GPU_MODE_HBLANK || GET_LCDC_MODE() == GPU_MODE_VBLANK) && (cpu.memory.LCDC_ctl & 0x80)) {
 				cpu.memory.IF_intflag |= INTERRUPTS_LCDSTAT;
 			}
 			break;
 		case 0x44: // read only
+			break;
+		case 0x45:
+			cpu.memory.LYC_lcdcompare = value;
+			if (cpu.memory.LCDC_ctl & 0x80) {
+				if (cpu.memory.LY_lcdline == value) {
+					cpu.memory.STAT_lcdstatus |= STAT_LYCSIGNAL;
+					if (cpu.memory.STAT_lcdstatus & STAT_LYCCHECK) {
+						cpu.memory.IF_intflag |= INTERRUPTS_LCDSTAT;
+					}
+				} else {
+					cpu.memory.STAT_lcdstatus &= ~STAT_LYCSIGNAL;
+				}
+			}
 			break;
 		case 0x46:
 			oamDMA(value); // OAM DMA
@@ -333,9 +370,9 @@ void writeByteSpecial(unsigned int address, unsigned char value) {
 			break;
 		case 0x4F:	// CGB VRAM select
 			if (cgb.isCGB) {
-				int vram = value & 1;
-				cpu.memory.VBK_cgbvram = 0xFE | vram;
-				cgbSelectVRAM(vram);
+				int vramBank = value & 1;
+				cpu.memory.VBK_cgbvram = 0xFE | vramBank;
+				cgbSelectVRAM(vramBank);
 			}
 			break;
 		case 0x51:	// CGB DMA Src high byte, write only
@@ -363,15 +400,25 @@ void writeByteSpecial(unsigned int address, unsigned char value) {
 				cgbDMAOp(value);
 			}
 			break;
+		case 0x68:	// CGB BG palette index (bit 6 always reads 1)
+			if (cgb.isCGB) {
+				cpu.memory.BGPI_bgpalindex = (value & 0xBF) | 0x40;
+			}
+			break;
 		case 0x69:	// CGB BG palette write
 			if (cgb.isCGB) {
 				int index = cpu.memory.BGPI_bgpalindex & 0x3F;
 				cgb.paletteMemory[index] = value;
 				if (cpu.memory.BGPI_bgpalindex & 0x80) {
 					index = (index + 1) & 0x3F;
-					cpu.memory.BGPI_bgpalindex = 0x80 | index;
+					cpu.memory.BGPI_bgpalindex = 0xC0 | index;
 				}
 				cgb.dirtyPalette = true;
+			}
+			break;
+		case 0x6A:	// CGB OBJ palette index (bit 6 always reads 1)
+			if (cgb.isCGB) {
+				cpu.memory.OBPI_objpalindex = (value & 0xBF) | 0x40;
 			}
 			break;
 		case 0x6B:	// CGB OBJ palette write
@@ -380,7 +427,7 @@ void writeByteSpecial(unsigned int address, unsigned char value) {
 				cgb.paletteMemory[64+index] = value;
 				if (cpu.memory.OBPI_objpalindex & 0x80) {
 					index = (index + 1) & 0x3F;
-					cpu.memory.OBPI_objpalindex = 0x80 | index;
+					cpu.memory.OBPI_objpalindex = 0xC0 | index;
 				}
 				cgb.dirtyPalette = true;
 			}

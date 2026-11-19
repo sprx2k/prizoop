@@ -367,10 +367,10 @@ typedef enum {
 	DT_Winsim
 } DeviceType;
 
-inline DeviceType getDeviceType() {
+static inline DeviceType getDeviceType(void) {
 #if TARGET_PRIZM
-#ifdef PLATFORM
-	return (PLATFORM == cw || (unsigned int)GetVRAMAddress() == 0xAC000000) ? DT_CG50 : DT_CG20;
+#ifdef PRIZOOP_IS_CW
+	return (PRIZOOP_IS_CW || (unsigned int)GetVRAMAddress() == 0xAC000000) ? DT_CG50 : DT_CG20;
 #else
 	return (unsigned int)GetVRAMAddress() == 0xAC000000 ? DT_CG50 : DT_CG20;
 #endif

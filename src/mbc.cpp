@@ -1,7 +1,7 @@
-
 #include "platform.h"
 
 #include "mbc.h"
+#include "rom.h"
 #include "keys.h"
 #include "memory.h"
 #include "emulator.h"
@@ -13,7 +13,7 @@
 mbc_bankcache* cachedBanks[NUM_CACHED_BANKS];
 unsigned int cachedBankIndex[NUM_CACHED_BANKS];
 unsigned int lastCacheRequestIndex[NUM_CACHED_BANKS];
-int cacheIndex = 0;
+unsigned int cacheIndex = 0;
 
 // for higher RAM requirements, we use cached banks to store our ram, the rest our stored starting with firstRomCache, as indicated by this var
 unsigned int firstRomCache = 0;
@@ -23,6 +23,11 @@ unsigned int sramHash = 0;
 
 // the memory bus controller object
 mbc_state mbc;
+
+// MBC1 internal 5-bit/2-bit register state and mode-1 bank 0 selection
+static unsigned char mbc1Low = 0;
+static unsigned char mbc1High = 0;
+static unsigned char mbc1Bank0 = 0;
 
 // the real time clock object
 rtc_state rtc;
@@ -91,9 +96,7 @@ unsigned int getRAMSize() {
 	}
 }
 
-// we don't support large RAM sizes yet..
 bool supportedRAM(ramSizeType type) {
-	// not yet supporting RAM bank switching:
 	switch (type) {
 		case RAM_NONE: 
 		case RAM_2KB:
@@ -105,19 +108,19 @@ bool supportedRAM(ramSizeType type) {
 			firstRomCache = 0;
 			return true;
 		case RAM_32KB:
-			// need 2 pages:
+			// need 8 4KB pages:
 			mbc.ramBank = 0;
 			mbc.numRamBanks = 4;
 			firstRomCache = 8;
 			return true;
 		case RAM_64KB:
-			// need 4 pages:
+			// need 16 4KB pages:
 			mbc.ramBank = 0;
 			mbc.numRamBanks = 8;
 			firstRomCache = 16;
 			return true;
 		case RAM_128KB:
-			// need 8 pages:
+			// need 32 4KB pages:
 			mbc.ramBank = 0;
 			mbc.numRamBanks = 16;
 			firstRomCache = 32;
@@ -127,7 +130,7 @@ bool supportedRAM(ramSizeType type) {
 	return false;
 }
 
-// number of RAM nibbles to allocate to the memory mapper when using SRAM
+// number of RAM 256-byte pages to allocate to the memory mapper when using SRAM
 unsigned char ramNibbleCount(ramSizeType type) {
 	switch (type) {
 		case RAM_NONE: return 0;
@@ -143,16 +146,21 @@ unsigned char ramNibbleCount(ramSizeType type) {
 	return 0;
 }
 
-// support up to a 4 MB ROM 
-static unsigned char* BlockAddresses[1024] = { 0 };
+// support up to a 4 MB ROM (+ 8 KB .gbz header/table)
+#define MAX_ROM_BLOCKS 1026
+static unsigned char* BlockAddresses[MAX_ROM_BLOCKS] = { 0 };
+static unsigned int romFileSize = 0;
+
 void mbcFileUpdate() {
 	memset(BlockAddresses, 0, sizeof(BlockAddresses));
+	romFileSize = 0;
 	if (mbc.romFile < 0)
 		return;
 	int fileSize = Bfile_GetFileSize_OS(mbc.romFile);
 	if (fileSize < 0)
 		return;
-	int numBlocks = min((fileSize + 4095) / 4096, 1024); // 16k ROM banks means 4 4k blocks a piece
+	romFileSize = (unsigned int)fileSize;
+	int numBlocks = min((fileSize + 4095) / 4096, MAX_ROM_BLOCKS);
 	for (int i = 0; i < numBlocks; i++) {
 		int ret = Bfile_GetBlockAddress(mbc.romFile, i * 0x1000, &BlockAddresses[i]);
 		if (ret < 0)
@@ -162,15 +170,22 @@ void mbcFileUpdate() {
 }
 
 static int mbcReadFile(unsigned char* into, unsigned int size, unsigned int offset) {
+	if (offset >= romFileSize) {
+		return 0;
+	}
+	if (size > romFileSize - offset) {
+		size = romFileSize - offset;
+	}
+
 	// use block addresses to do direct copy
-	int sizeLeft = size;
+	unsigned int sizeLeft = size;
 	unsigned int block = offset / 4096;
 	unsigned int blockAddr = offset % 4096;
 	while (sizeLeft) {
-		if (block >= 1024 || !BlockAddresses[block]) {
-			return size - sizeLeft;
+		if (block >= MAX_ROM_BLOCKS || !BlockAddresses[block]) {
+			return (int)(size - sizeLeft);
 		}
-		int blockRem = min(4096 - (int)blockAddr, sizeLeft);
+		unsigned int blockRem = min(4096U - blockAddr, sizeLeft);
 		memcpy(into, BlockAddresses[block] + blockAddr, blockRem);
 		into += blockRem;
 		sizeLeft -= blockRem;
@@ -181,7 +196,7 @@ static int mbcReadFile(unsigned char* into, unsigned int size, unsigned int offs
 		// update sound around all file reads
 		condSoundUpdate();
 	}
-	return size;
+	return (int)size;
 }
 
 bool mbcReadPage(unsigned int bankIndex, unsigned char* target, bool instrOverlap) {
@@ -202,14 +217,14 @@ bool mbcReadPage(unsigned int bankIndex, unsigned char* target, bool instrOverla
 			return mbcReadFile(target, 0x1000 + overlapBytes, compressedPages[bankIndex]) == (int)(0x1000 + overlapBytes);
 		} else {
 			static unsigned char compBuffer[4098];
-			if (mbcReadFile(compBuffer, compSize, compressedPages[bankIndex]) != compSize) {
+			if (mbcReadFile(compBuffer, (unsigned int)compSize, compressedPages[bankIndex]) != compSize) {
 				return false;
 			}
 			if (instrOverlap) {
-				return ZX7Decompress(compBuffer, target, 4098) == 0;
+				return ZX7Decompress(compBuffer, (unsigned int)compSize, target, 4098) == 0;
 			} else {
 				static unsigned char uncompBuffer[4098];
-				if (ZX7Decompress(compBuffer, uncompBuffer, 4098) != 0) {
+				if (ZX7Decompress(compBuffer, (unsigned int)compSize, uncompBuffer, 4098) != 0) {
 					return false;
 				}
 				memcpy(target, uncompBuffer, 4096);
@@ -217,7 +232,7 @@ bool mbcReadPage(unsigned int bankIndex, unsigned char* target, bool instrOverla
 			}
 		}
 	} else {
-		unsigned int read = mbcReadFile(target, 0x1000 + overlapBytes, bankIndex * 0x1000);
+		unsigned int read = (unsigned int)mbcReadFile(target, 0x1000 + overlapBytes, bankIndex * 0x1000);
 		DebugAssert(read == 0x1000 + overlapBytes);
 		if (read == 0x1000 + overlapBytes) {
 			return true;
@@ -227,7 +242,7 @@ bool mbcReadPage(unsigned int bankIndex, unsigned char* target, bool instrOverla
 	return false;
 }
 
-// returns the cached rom bank (or caches it) with the given index (which is a a factor of the number of caches per rom bank)
+// returns the cached rom bank (or caches it) with the given index (which is a factor of the number of caches per rom bank)
 mbc_bankcache* cacheBank(unsigned int index) {
 	cacheIndex++;
 
@@ -236,6 +251,7 @@ mbc_bankcache* cacheBank(unsigned int index) {
 		for (int i = firstRomCache; i < NUM_CACHED_BANKS; i++) {
 			lastCacheRequestIndex[i] = 0;
 		}
+		cacheIndex = 1;
 	}
 
 	int minSlot = firstRomCache;
@@ -250,7 +266,9 @@ mbc_bankcache* cacheBank(unsigned int index) {
 	}
 
 	// uncached! using minimum cache request index, read into slot from file and return
-	if (!mbcReadPage(index, cachedBanks[minSlot]->bank,  index != unsigned(mbc.numRomBanks * 4 - 1))) {
+	if (!mbcReadPage(index, cachedBanks[minSlot]->bank, index != unsigned(mbc.numRomBanks * 4 - 1))) {
+		cachedBankIndex[minSlot] = 0xFFFFFFFF;
+		lastCacheRequestIndex[minSlot] = 0;
 		// attempt to escape
 		keys.exit = true;
 		return cachedBanks[firstRomCache];
@@ -275,10 +293,14 @@ unsigned short numSwitchableBanksFromType(unsigned char romSizeByte) {
 	}
 }
 
-// selects the given rom bank
+// selects the given rom bank (masked to cartridge ROM size)
 void selectRomBank(unsigned char bankNum) {
-	if (bankNum < mbc.numRomBanks && bankNum != mbc.romBank) {
-		mbc.romBank = bankNum;
+	if (mbc.numRomBanks == 0) {
+		return;
+	}
+	unsigned char masked = (unsigned char)((unsigned int)bankNum % mbc.numRomBanks);
+	if (masked != mbc.romBank) {
+		mbc.romBank = masked;
 
 		// invalidate addresses in memory map for reading
 		for (int i = 0x40; i <= 0x7f; i++) {
@@ -287,11 +309,42 @@ void selectRomBank(unsigned char bankNum) {
 	}
 }
 
+static void selectMBC1Bank0(unsigned char bankNum) {
+	if (mbc.numRomBanks == 0) {
+		return;
+	}
+	unsigned char masked = (unsigned char)((unsigned int)bankNum % mbc.numRomBanks);
+	if (masked == mbc1Bank0) {
+		return;
+	}
+	mbc1Bank0 = masked;
+	if (mbc1Bank0 == 0) {
+		for (int i = 0x00; i <= 0x3f; i++) {
+			memoryMap[i] = &cart[i << 8];
+			specialMap[i] &= ~0x10;
+		}
+	} else {
+		for (int i = 0x00; i <= 0x3f; i++) {
+			specialMap[i] |= 0x10;
+		}
+	}
+}
+
 unsigned char mbcRead(unsigned short address) {
-	DebugAssert(address >= 0x4000 && address <= 0x7FFF);
+	DebugAssert(address <= 0x7FFF);
 
 	unsigned char highNibble = address >> 12;
-	mbc_bankcache* cache = cacheBank(mbc.romBank * 4 + highNibble - 4);
+	unsigned int bankIndex;
+	if (address < 0x4000) {
+		bankIndex = (unsigned int)mbc1Bank0 * 4 + highNibble;
+	} else {
+		bankIndex = (unsigned int)mbc.romBank * 4 + highNibble - 4;
+	}
+
+	mbc_bankcache* cache = cacheBank(bankIndex);
+	if (keys.exit) {
+		return 0xFF;
+	}
 
 	for (int i = 0; i < 16; i++) {
 		// map the cache
@@ -305,7 +358,11 @@ unsigned char mbcRead(unsigned short address) {
 
 // selects the given ram bank
 void selectRamBank(unsigned char bankNum, bool force = false) {
-	if ((bankNum != mbc.ramBank || force) && bankNum < mbc.numRamBanks) {
+	if (mbc.numRamBanks == 0) {
+		return;
+	}
+	bankNum = (unsigned char)(bankNum % mbc.numRamBanks);
+	if (bankNum != mbc.ramBank || force) {
 		mbc.ramBank = bankNum;
 		if (mbc.sramEnabled && mbc.numRamBanks > 1) {
 			// map memory to our usurped rom cache area
@@ -313,7 +370,7 @@ void selectRamBank(unsigned char bankNum, bool force = false) {
 				memoryMap[0xa0 + i] = &cachedBanks[bankNum * 2]->bank[i << 8];
 			}
 			for (int i = 0; i < 16; i++) {
-				memoryMap[0xb0 + i] = &cachedBanks[bankNum * 2+1]->bank[i << 8];
+				memoryMap[0xb0 + i] = &cachedBanks[bankNum * 2 + 1]->bank[i << 8];
 			}
 		}
 	}
@@ -328,10 +385,15 @@ void enableSRAM() {
 		rtcSelectReg(rtc.rtcReg);
 		return;
 	}
-	if (mbc.numRamBanks <= 1) {
+	if (mbc.ramType == RAM_MBC2) {
+		// MBC2 has 512 bytes echoed across 0xA000-0xBFFF
+		for (int i = 0; i < 32; i++) {
+			memoryMap[0xa0 + i] = &sram[(i & 1) << 8];
+		}
+	} else if (mbc.numRamBanks <= 1) {
 		int nibbleCount = ramNibbleCount(mbc.ramType);
-		for (int i = 0; i < nibbleCount; i++) {
-			memoryMap[0xa0 + i] = &sram[i << 8];
+		for (int i = 0; i < 32; i++) {
+			memoryMap[0xa0 + i] = (i < nibbleCount) ? &sram[i << 8] : &disabledArea[0];
 		}
 	} else {
 		selectRamBank(mbc.ramBank, true);
@@ -346,66 +408,84 @@ void disableSRAM() {
 	}
 }
 
+static void mbc1UpdateBanks() {
+	unsigned char low = (mbc1Low == 0) ? 1 : mbc1Low;
+	unsigned char romBank = (unsigned char)((mbc1High << 5) | low);
+	selectRomBank(romBank);
+	if (mbc.bankMode == 1) {
+		selectMBC1Bank0((unsigned char)(mbc1High << 5));
+		selectRamBank(mbc1High);
+	} else {
+		selectMBC1Bank0(0);
+		selectRamBank(0);
+	}
+}
 
 // MBC3 RTC support
 
 #if TARGET_PRIZM
-inline int FromBCD(int x) {
+static inline unsigned int FromBCD(unsigned int x) {
 	return (x & 0xF) + ((x & 0xF0) >> 4) * 10 + ((x & 0xF00) >> 8) * 100 + ((x & 0xF000) >> 12) * 1000;
 }
-#define RTCSeconds() FromBCD(*((unsigned char*) (RTC_port + 2)))
-#define RTCMinute() FromBCD(*((unsigned char*) (RTC_port + 4)))
-#define RTCHour() FromBCD(*((unsigned char*) (RTC_port + 6)))
-#define RTCDay() FromBCD(*((unsigned char*) (RTC_port + 10)))
-#define RTCMonth() FromBCD(*((unsigned char*) (RTC_port + 12)))
-#define RTCYear() FromBCD(*((unsigned short*) (RTC_port + 14)))
+#define RTCSeconds() FromBCD(*((volatile unsigned char*)(RTC_port + 2)))
+#define RTCMinute()  FromBCD(*((volatile unsigned char*)(RTC_port + 4)))
+#define RTCHour()    FromBCD(*((volatile unsigned char*)(RTC_port + 6)))
+#define RTCDay()     FromBCD(*((volatile unsigned char*)(RTC_port + 10)))
+#define RTCMonth()   FromBCD(*((volatile unsigned char*)(RTC_port + 12)))
+#define RTCYear()    FromBCD(*((volatile unsigned short*)(RTC_port + 14)))
 #endif
 
 // converts current rtc values to seconds
 unsigned int rtcToSeconds() {
-	unsigned char sec, min, hour, day, month;
-	unsigned short year;
+	unsigned int sec, min, hour, day, month, year;
 
 #if TARGET_PRIZM
-	sec = RTCSeconds();
-	min = RTCMinute();
-	hour = RTCHour();
-	day = RTCDay();
-	month = RTCMonth();
-	year = RTCYear();
+	// Retry if seconds rolled over mid-read to prevent torn time values
+	for (int attempt = 0; attempt < 4; attempt++) {
+		unsigned int sec1 = RTCSeconds();
+		min = RTCMinute();
+		hour = RTCHour();
+		day = RTCDay();
+		month = RTCMonth();
+		year = RTCYear();
+		sec = RTCSeconds();
+		if (sec == sec1) {
+			break;
+		}
+	}
 #else
 	time_t t = time(0);
 	tm* cal = localtime(&t);
-	sec = cal->tm_sec;
-	min = cal->tm_min;
-	hour = cal->tm_hour;
-	day = cal->tm_mday;
-	month = cal->tm_mon + 1;
-	year = cal->tm_year + 1900;
+	sec = (unsigned int)cal->tm_sec;
+	min = (unsigned int)cal->tm_min;
+	hour = (unsigned int)cal->tm_hour;
+	day = (unsigned int)cal->tm_mday;
+	month = (unsigned int)(cal->tm_mon + 1);
+	year = (unsigned int)(cal->tm_year + 1900);
 #endif
 
-	// calculate days given years and month
-	// accurate to 16 years is fine (and avoids inaccuracy)
-	year %= 16;
-	if (year) {
-		day += (year - 1) * 1461 / 4;		// 365.25
-	}
+	// calculate days given years and month (16-year modulo window covers 2000-2099 leap years accurately)
+	unsigned int y = year % 16;
+	unsigned int totalDays = (y > 0) ? (y * 365U + (y - 1U) / 4U + 1U) : 0U;
 	switch (month) {
-		case 12: day += 30;
-		case 11: day += 31;
-		case 10: day += 30;
-		case  9: day += 31;
-		case  8: day += 31;
-		case  7: day += 30;
-		case  6: day += 31;
-		case  5: day += 30;
-		case  4: day += 31;
-		case  3: day += 28; if (year % 4 == 0) day++;
-		case  2: day += 31;
+		case 12: totalDays += 30;
+		case 11: totalDays += 31;
+		case 10: totalDays += 30;
+		case  9: totalDays += 31;
+		case  8: totalDays += 31;
+		case  7: totalDays += 30;
+		case  6: totalDays += 31;
+		case  5: totalDays += 30;
+		case  4: totalDays += 31;
+		case  3: totalDays += 28; if ((y % 4) == 0) totalDays++;
+		case  2: totalDays += 31;
 	}
-	
+	if (day > 0) {
+		totalDays += (day - 1U);
+	}
+
 	// calculate seconds and return
-	return sec + min * 60 + hour * 60 * 60 + day * 60 * 60 * 24;
+	return sec + min * 60U + hour * 3600U + totalDays * 86400U;
 }
 
 bool mbcIsRTC() {
@@ -419,8 +499,10 @@ bool mbcIsRTC() {
 #define RTC_CTL 0x0C
 
 void rtcLatch() {
-	// latch
-	rtc.curRTC = rtcToSeconds() - rtc.rtcBase;
+	// latch (frozen while halted)
+	if (!rtc.isHalted) {
+		rtc.curRTC = rtcToSeconds() - rtc.rtcBase;
+	}
 }
 
 int rtcGetLatched(int forReg) {
@@ -433,22 +515,24 @@ int rtcGetLatched(int forReg) {
 			return (rtc.curRTC / 3600) % 24;
 		case RTC_DAYS:
 			return (rtc.curRTC / (3600 * 24)) % 256;
-		case RTC_CTL:
-			// bit 0 : hi day bit
+		case RTC_CTL: {
+			// bit 0 : hi day bit (bit 8 of 9-bit day counter)
 			// bit 6 : halt
-			// bit 7 : day carry
+			// bit 7 : day carry (>= 512 days)
+			unsigned int days = rtc.curRTC / (3600U * 24U);
 			return
-				(((rtc.curRTC / (3600 * 24)) / 256) ? 1 : 0) |
+				((days & 0x100) ? 1 : 0) |
 				(rtc.isHalted ? (1 << 6) : 0) |
-				(((rtc.curRTC / (3600 * 24)) / 512) ? (1 << 7) : 0);
+				((days >= 512) ? (1 << 7) : 0);
+		}
 	}
 
 	return 0;
 }
 
 void rtcCheckDirty() {
-	// check for dirty rtc value if a register is selected (it's about to change)
-	if (rtc.rtcReg) {
+	// check for dirty rtc value if a register is selected and SRAM/RTC is enabled
+	if (mbc.sramEnabled && rtc.rtcReg >= RTC_SEC && rtc.rtcReg <= RTC_CTL) {
 		unsigned char newValue = rtc.rtcValue;
 
 		for (int i = 0; i < 256; i++) {
@@ -460,7 +544,7 @@ void rtcCheckDirty() {
 
 		if (newValue != rtc.rtcValue) {
 			// update rtc base (or halt) according to type of value selected
-			int diff = newValue - (int) rtc.rtcValue;
+			int diff = (int)newValue - (int)rtc.rtcValue;
 			switch (rtc.rtcReg) {
 				case RTC_SEC:
 					rtc.curRTC += diff;
@@ -482,31 +566,32 @@ void rtcCheckDirty() {
 				{
 					// remove 512 day carry flag?
 					if ((rtc.rtcValue & 0x80) && (newValue & 0x80) == 0) {
-						int newVal = rtc.curRTC % (3600 * 24 * 512);
-						int diff = newVal - rtc.curRTC;
-						rtc.curRTC += diff;
-						rtc.rtcBase -= diff;
+						unsigned int newVal = rtc.curRTC % (3600U * 24U * 512U);
+						int d = (int)(newVal - rtc.curRTC);
+						rtc.curRTC += d;
+						rtc.rtcBase -= d;
 					}
-					// remove 256 day flag?
+					// toggle 256 day flag?
 					if ((rtc.rtcValue & 0x01) != (newValue & 0x01)) {
-						int newVal;
+						unsigned int newVal;
 						if (newValue & 0x01) {
-							newVal = rtc.curRTC + 3600 * 24 * 256;
+							newVal = rtc.curRTC + 3600U * 24U * 256U;
 						} else {
-							newVal = rtc.curRTC % (3600 * 24 * 256);
+							newVal = rtc.curRTC % (3600U * 24U * 256U);
 						}
-						int diff = newVal - rtc.curRTC;
-						rtc.curRTC += diff;
-						rtc.rtcBase -= diff;
+						int d = (int)(newVal - rtc.curRTC);
+						rtc.curRTC += d;
+						rtc.rtcBase -= d;
 					}
 					// halt flag
 					if ((rtc.rtcValue & 0x40) != (newValue & 0x40)) {
 						if (newValue & 0x40) {
-							// halt
-							rtc.isHalted = true;
+							// halt: freeze curRTC at current elapsed time
+							rtc.curRTC = rtcToSeconds() - rtc.rtcBase;
+							rtc.isHalted = 1;
 						} else {
 							// unhalt
-							rtc.isHalted = false;
+							rtc.isHalted = 0;
 							rtc.rtcBase = rtcToSeconds() - rtc.curRTC;
 						}
 					}
@@ -514,6 +599,7 @@ void rtcCheckDirty() {
 			}
 
 			rtc.rtcValue = newValue;
+			memset(rtcMap, newValue, sizeof(rtcMap));
 		}
 	}
 }
@@ -528,21 +614,30 @@ void rtcSelectReg(unsigned char reg) {
 	}
 	
 	// update rtcmap and point memory to it
-	for (int i = 0; i < 256; i++) {
-		rtcMap[i] = rtc.rtcValue;
-	}
+	memset(rtcMap, rtc.rtcValue, sizeof(rtcMap));
 	for (int i = 0xa0; i <= 0xbf; i++) {
 		memoryMap[i] = &rtcMap[0];
 	}
 }
 
+static unsigned int curRAMHash(int size);
+
 bool setupMBCType(mbcType type, unsigned char romSizeByte, unsigned char ramSizeByte, int fileID) {
 	memset(&mbc, 0, sizeof(mbc));
 	memset(&rtc, 0, sizeof(rtc));
+	memset(sram, 0, sizeof(sram));
 	memset(cachedBankIndex, 0xFF, sizeof(cachedBankIndex));
 	memset(lastCacheRequestIndex, 0, sizeof(lastCacheRequestIndex));
 	cacheIndex = 0;
 	firstRomCache = 0;
+	mbc1Low = 0;
+	mbc1High = 0;
+	mbc1Bank0 = 0;
+
+	for (int i = 0x00; i <= 0x3f; i++) {
+		memoryMap[i] = &cart[i << 8];
+		specialMap[i] &= ~0x10;
+	}
 
 	mbc.romFile = fileID;
 	mbc.type = type;
@@ -556,6 +651,7 @@ bool setupMBCType(mbcType type, unsigned char romSizeByte, unsigned char ramSize
 			mbc.numRamBanks = 1;
 			selectRomBank(1);
 			enableSRAM();
+			sramHash = curRAMHash(getRAMSize());
 			return true;
 		case ROM_MBC2_BATTERY:
 			mbc.batteryBacked = 1;
@@ -605,11 +701,18 @@ bool setupMBCType(mbcType type, unsigned char romSizeByte, unsigned char ramSize
 		rtc.rtcBase = rtcToSeconds() - 1;
 	}
 
-	// support if we support the ram bank type
+	// check if we support the ram bank type
 	if (!supportedRAM(mbc.ramType)) {
 		mbc.batteryBacked = 0;
 		return false;
 	}
+
+	// zero out multi-bank SRAM storage in cachedBanks so uninitialized stack bytes never leak into saves
+	for (unsigned int i = 0; i < firstRomCache; i++) {
+		memset(cachedBanks[i]->bank, 0, sizeof(cachedBanks[i]->bank));
+	}
+
+	sramHash = curRAMHash(getRAMSize());
 
 	return true;
 }
@@ -624,37 +727,22 @@ void mbcWrite(unsigned short address, unsigned char value) {
 		case ROM_MBC1:
 		case ROM_MBC1_RAM:
 		case ROM_MBC1_RAM_BATT:
-			// switch bank mode
+			// switch bank mode (0x6000-0x7FFF)
 			if (upperNibble >= 0x06) {
 				mbc.bankMode = value & 1;
-				if (mbc.bankMode == 0 && mbc.ramBank != 0) {
-					selectRamBank(0);
-				}
-				else if (mbc.bankMode == 1 && mbc.romBank >= 0x20) {
-					selectRomBank(mbc.romBank & 0x1F);
-				}
+				mbc1UpdateBanks();
 			}
-			// upper bank / RAM bank select
+			// upper 2-bit bank / RAM bank select (0x4000-0x5FFF)
 			else if (upperNibble >= 0x04) {
-				if (mbc.bankMode == 0) {
-					selectRomBank(((value & 3) << 5) | (mbc.romBank & 0x1F));
-				}
-				else {
-					selectRamBank(value & 3);
-				}
+				mbc1High = value & 0x03;
+				mbc1UpdateBanks();
 			}
-			// ROM bank select (lower 5 bits)
+			// ROM bank select lower 5 bits (0x2000-0x3FFF)
 			else if (upperNibble >= 0x02) {
-				if ((value & 0x1F) <= 1) {
-					// 1 or 0 always selects rom 1
-					selectRomBank((mbc.romBank & 0xE0) | 1);
-				}
-				else {
-					// make lower 5 bits into existing rom bank selection
-					selectRomBank((mbc.romBank & 0xE0) | (value & 0x1F));
-				}
+				mbc1Low = value & 0x1F;
+				mbc1UpdateBanks();
 			}
-			// RAM enable
+			// RAM enable (0x0000-0x1FFF)
 			else {
 				if ((value & 0x0F) == 0x0A) {
 					enableSRAM();
@@ -666,8 +754,8 @@ void mbcWrite(unsigned short address, unsigned char value) {
 			return;
 		case ROM_MBC2_BATTERY:
 		case ROM_MBC2:
-			// RAM enable
-			if (upperNibble <= 0x01) {
+			// MBC2 decodes bit 8 of address across 0x0000-0x3FFF
+			if (upperNibble <= 0x03) {
 				if ((address & 0x0100) == 0) {
 					if ((value & 0x0F) == 0x0A) {
 						enableSRAM();
@@ -675,15 +763,9 @@ void mbcWrite(unsigned short address, unsigned char value) {
 					else {
 						disableSRAM();
 					}
-				}
-			} 
-			// ROM select
-			else if (upperNibble <= 0x03) {
-				if ((address & 0x0100) != 0) {
-					if ((value & 0x0F) != 0) {
-						// make lower 4 bits into existing rom bank selection
-						selectRomBank(value & 0x0F);
-					}
+				} else {
+					unsigned char bank = value & 0x0F;
+					selectRomBank(bank ? bank : 1);
 				}
 			}
 			return;
@@ -757,7 +839,7 @@ void mbcWrite(unsigned short address, unsigned char value) {
 				if (mbc.rumblePack) {
 					selectRamBank(value & 0x7);
 				} else {
-					selectRamBank(value);
+					selectRamBank(value & 0xF);
 				}
 			}
 			return;
@@ -783,6 +865,11 @@ static unsigned int curRAMHash(int size) {
 	return ret;
 }
 
+static void SwapRTCState(rtc_state& r) {
+	EndianSwap(r.rtcBase);
+	EndianSwap(r.curRTC);
+}
+
 // attempts to load SRAM from the given file path, false on error
 bool tryLoadSRAM(const char* filepath) {
 	int sramSize = ramNibbleCount(mbc.ramType) * 256;
@@ -802,41 +889,38 @@ bool tryLoadSRAM(const char* filepath) {
 			return false;
 		}
 
+		bool readOk = true;
 		if (sramSize <= 8192) {
-			if (sramSize == 0 || Bfile_ReadFile_OS(hFile, sram, sramSize, 0) == sramSize) {
-				sramHash = curRAMHash(sramSize);
-
-				// read rtc is we need it
-				if (!rtcSize || Bfile_ReadFile_OS(hFile, &rtc, rtcSize, -1) == rtcSize) {
-					Bfile_CloseFile_OS(hFile);
-					return true;
-				}
+			if (sramSize > 0 && Bfile_ReadFile_OS(hFile, sram, sramSize, 0) != sramSize) {
+				readOk = false;
 			}
 		} else {
 			// read each bank
-			bool failed = false;
 			for (unsigned char i = 0; i < mbc.numRamBanks * 2; i++) {
 				if (Bfile_ReadFile_OS(hFile, &cachedBanks[i]->bank[0], 0x1000, i * 0x1000) != 0x1000) {
-					failed = true;
+					readOk = false;
 				}
 			}
-			if (!failed) {
-				sramHash = curRAMHash(sramSize);
+		}
 
-				// read rtc is we need it
-				if (!rtcSize || Bfile_ReadFile_OS(hFile, &rtc, rtcSize, -1) == rtcSize) {
-					Bfile_CloseFile_OS(hFile);
-					return true;
+		if (readOk) {
+			sramHash = curRAMHash(sramSize);
+
+			// read rtc if we need it
+			if (rtcSize) {
+				rtc_state tmpRtc;
+				if (Bfile_ReadFile_OS(hFile, &tmpRtc, rtcSize, sramSize) == rtcSize) {
+					SwapRTCState(tmpRtc);
+					rtc = tmpRtc;
+				} else {
+					readOk = false;
 				}
 			}
 		}
 
 		Bfile_CloseFile_OS(hFile);
-
-		// didn't read correctly
-		return false;
-	}
-	else {
+		return readOk;
+	} else {
 		// no sram
 		return false;
 	}
@@ -850,50 +934,76 @@ void trySaveSRAM(const char* filepath) {
 	if (mbc.numRamBanks > 1) {
 		sramSize = 8192 * mbc.numRamBanks;
 	}
+	if (sramSize + rtcSize <= 0) {
+		return;
+	}
+
 	unsigned int curHash = curRAMHash(sramSize);
 
 	if (curHash != sramHash || rtcSize) {
+		if (isStorageLockedSafe()) {
+			return;
+		}
+
 		unsigned short pFile[256];
 		Bfile_StrToName_ncpy(pFile, (const char*)filepath, strlen(filepath) + 2);
 
-		int hFile = Bfile_OpenFile_OS(pFile, WRITE, 0); // Get handle
-		if (hFile < 0) {
-			// attempt to create
-			size_t wantedSize = sramSize + rtcSize;
-			if (Bfile_CreateEntry_OS(pFile, CREATEMODE_FILE, &wantedSize))
-				return;
-
-			hFile = Bfile_OpenFile_OS(pFile, WRITE, 0); // Get handle
-			if (hFile < 0) {
-				// create didn't work!
-				return;
-			}
+		size_t wantedSize = (size_t)(sramSize + rtcSize);
+		Bfile_DeleteEntry(pFile);
+		if (Bfile_CreateEntry_OS(pFile, CREATEMODE_FILE, &wantedSize) < 0) {
+			return;
 		}
 
+		int hFile = Bfile_OpenFile_OS(pFile, WRITE, 0); // Get handle
+		if (hFile < 0) {
+			Bfile_DeleteEntry(pFile);
+			return;
+		}
+
+		bool writeOk = true;
 		if (sramSize <= 8192) {
-			if (sramSize > 0) {
-				Bfile_WriteFile_OS(hFile, sram, sramSize);
+			if (sramSize > 0 && Bfile_WriteFile_OS(hFile, sram, sramSize) < 0) {
+				writeOk = false;
 			}
 		} else {
 			// write each bank
 			for (unsigned char i = 0; i < mbc.numRamBanks * 2; i++) {
-				Bfile_WriteFile_OS(hFile, &cachedBanks[i]->bank[0], 0x1000);
+				if (Bfile_WriteFile_OS(hFile, &cachedBanks[i]->bank[0], 0x1000) < 0) {
+					writeOk = false;
+					break;
+				}
 			}
 		}
 
-		if (rtcSize) {
-			Bfile_WriteFile_OS(hFile, &rtc, rtcSize);
+		if (writeOk && rtcSize) {
+			rtc_state tmpRtc = rtc;
+			SwapRTCState(tmpRtc);
+			if (Bfile_WriteFile_OS(hFile, &tmpRtc, rtcSize) < 0) {
+				writeOk = false;
+			}
 		}
 
 		Bfile_CloseFile_OS(hFile);
 
-		// now in sync with file system
-		sramHash = curHash;
+		if (writeOk) {
+			// now in sync with file system
+			sramHash = curHash;
+		} else {
+			Bfile_DeleteEntry(pFile);
+		}
 	}
 }
 
 // call after state save load for proper handling
 void mbcOnStateLoad() {
+	if (mbc.type == ROM_MBC1 || mbc.type == ROM_MBC1_RAM || mbc.type == ROM_MBC1_RAM_BATT) {
+		mbc1Low = mbc.romBank & 0x1F;
+		mbc1High = (mbc.bankMode == 1) ? (mbc.ramBank & 0x03) : ((mbc.romBank >> 5) & 0x03);
+		selectMBC1Bank0(mbc.bankMode == 1 ? (unsigned char)(mbc1High << 5) : 0);
+	} else {
+		selectMBC1Bank0(0);
+	}
+
 	if (mbc.sramEnabled) {
 		enableSRAM();
 	} else {
@@ -903,9 +1013,5 @@ void mbcOnStateLoad() {
 	// invalidate memory areas for ROM bank
 	for (int i = 0x40; i <= 0x7f; i++) {
 		specialMap[i] |= 0x10;
-	}
-
-	if (getRAMSize() > 0) {
-		sramHash = curRAMHash(getRAMSize());
 	}
 }

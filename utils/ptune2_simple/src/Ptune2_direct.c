@@ -14,6 +14,8 @@
 
 #ifdef TARGET_PRIZM
 
+#include "config.h"
+#include "fxcg/display.h"
 #include "SH7305_CPG_BSC.h"
 
 //---------------------------------------------------------------------------------------------
@@ -147,10 +149,10 @@ static void change_FRQCRs( unsigned int value) {
     FRQCR_kick();
 }
 static int IsSupported() {
-#if TARGET_WINSIM
+#if TARGET_WINSIM || PRIZOOP_IS_CW
 	return 0;
 #else
-	return 1;
+	return getDeviceType() == DT_CG20 ? 1 : 0;
 #endif
 }
 //---------------------------------------------------------------------------------------------
@@ -202,16 +204,20 @@ void Ptune2_LoadSetting(int setting) {
 }
 
 int Ptune2_GetSetting() {
+	if (!IsSupported()) {
+		return PT2_UNKNOWN;
+	}
+
 	int ret = PT2_UNKNOWN;
 	int i, set, same;
 
 	PTuneRegs curRegs = Ptune2_CurrentRegs();
 	for (i = 0; i < 5; i++) {
 		same = 1;
-		// the freq register has some trash bits in it on reset:
-		unsigned int mask = i == 0 ? 0xFFF0FF0F : 0xFFFFFFFF;
 
 		for (set = 0; set < 8; set++) {
+			// FRQCR (regs[1]) has reserved/status bits on reset
+			unsigned int mask = (set == 1) ? 0xFFF0FF0F : 0xFFFFFFFF;
 			if ((curRegs.regs[set] & mask) != (sets[i].regs[set] & mask)) {
 				// special exception for PTune2-less CPU reset:
 				same = 0;

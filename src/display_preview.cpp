@@ -16,19 +16,24 @@ static void renderPreviewLine() {
 	if ((cpu.memory.LY_lcdline & 1) == 0) {
 		if (cgb.isCGB) {
 			RenderCGBScanline();
+			if (cgb.dirtyPalette) {
+				cgbResolvePalette();
+			}
 
+			unsigned char* src = &lineBuffer[8 + lineBuffer[0]];
 			unsigned char* previewLine = &emulator.pausePreview[80 * cpu.memory.LY_lcdline / 2];
 			// every other pixel goes into the preview line, packed at 8 bpp
-			for (int i = 8; i < 168; i += 2) {
-				*(previewLine++) = lineBuffer[i] >> 2;
+			for (int i = 0; i < 160; i += 2) {
+				*(previewLine++) = src[i] >> 2;
 			}
 		} else {
 			RenderDMGScanline();
 
+			unsigned char* src = &lineBuffer[8 + lineBuffer[0]];
 			unsigned char* previewLine = &emulator.pausePreview[80 * cpu.memory.LY_lcdline / 2];
 			// every other pixel goes into the preview line, packed at 4 bpp
-			for (int i = 8; i < 168; i += 2) {
-				*(previewLine++) = (lineBuffer[i+1] << 2) | (lineBuffer[i] >> 2);
+			for (int i = 0; i < 160; i += 2) {
+				*(previewLine++) = (src[i + 1] << 2) | (src[i] >> 2);
 			}
 		}
 
@@ -54,4 +59,8 @@ void enablePausePreview() {
 		renderBlankScanline = renderPreviewBlankLine;
 		drawFramebuffer = renderPreviewScreen;
 	}
+}
+
+bool isPausePreviewPending() {
+	return renderScanline == renderPreviewLine;
 }

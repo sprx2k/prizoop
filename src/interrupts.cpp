@@ -10,11 +10,12 @@
 #include "interrupts.h"
 
 inline void issueInterrupt(unsigned char flagMask, unsigned short toPC) {
-	// exit a halt no matter what
+	// exit a halt or stop no matter what
 	if (cpu.halted) {
 		cpu.halted = 0;
 		cpu.clocks += 4;
 	}
+	cpu.stopped = 0;
 
 	if (cpu.IME) {
 		// clear interrupt flag
@@ -22,6 +23,7 @@ inline void issueInterrupt(unsigned char flagMask, unsigned short toPC) {
 
 		// virtual di instruction
 		cpu.IME = 0;
+		cpuClearImeDelay();
 		writeShortToStack(cpu.registers.pc);
 		cpu.registers.pc = toPC;
 
@@ -36,8 +38,8 @@ void interruptStep(void) {
 		updateTimer();
 	}
 
-	unsigned char fire = cpu.memory.IE_intenable & cpu.memory.IF_intflag;
-	if ((cpu.IME || cpu.halted) && fire) {
+	unsigned char fire = cpu.memory.IE_intenable & cpu.memory.IF_intflag & 0x1F;
+	if ((cpu.IME || cpu.halted || cpu.stopped) && fire) {
 
 		// these are else if'd by interrupt priority
 		if (fire & INTERRUPTS_VBLANK) {

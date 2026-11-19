@@ -12,14 +12,33 @@
 cgb_type cgb;
 cgbworkram_type* cgb_wram[6] = { 0 };
 
-void cgbInitROM() {
+bool cgbInitROM() {
 	memset(&cgb, 0, sizeof(cgb));
 
+	// Standard CGB post-boot register state
 	cpu.registers.a = 0x11;
+	cpu.registers.f = 0x80;
+	cpu.registers.b = 0x00;
+	cpu.registers.c = 0x00;
+	cpu.registers.d = 0xFF;
+	cpu.registers.e = 0x56;
+	cpu.registers.h = 0x00;
+	cpu.registers.l = 0x0D;
 
 	// set up additional work RAM banks
 	for (int i = 0; i < 6; i++) {
+		if (cgb_wram[i]) {
+			delete cgb_wram[i];
+			cgb_wram[i] = NULL;
+		}
 		cgb_wram[i] = new cgbworkram_type;
+		if (!cgb_wram[i]) {
+			for (int j = 0; j < i; j++) {
+				delete cgb_wram[j];
+				cgb_wram[j] = NULL;
+			}
+			return false;
+		}
 		memset(cgb_wram[i]->data, 0, sizeof(cgb_wram[i]->data));
 	}
 
@@ -52,6 +71,7 @@ void cgbInitROM() {
 
 	// we are now in cgb mode!
 	cgb.isCGB = true;
+	return true;
 }
 
 void cgbSelectWRAM(int ramBank, bool force) {
@@ -76,9 +96,9 @@ void cgbSelectWRAM(int ramBank, bool force) {
 		for (int i = 0xd0; i <= 0xdf; i++) {
 			memoryMap[i] = &selected[(i - 0xd0) << 8];
 		}
-		// echo area of above ram
+		// echo area of above ram (0xF000-0xFDFF mirrors 0xD000-0xDDFF)
 		for (int i = 0xf0; i <= 0xfd; i++) {
-			memoryMap[i] = &selected[(i - 0xe0) << 8];
+			memoryMap[i] = &selected[(i - 0xf0) << 8];
 		}
 	}
 }
@@ -115,7 +135,7 @@ void cgbSpeedSwitch() {
 inline void cgbDmaCopyBits() {
 	DebugAssert(cgb.dmaDest >= 0x8000 && cgb.dmaDest <= 0x9FF0);
 
-	int source = cgb.dmaSrc;
+	unsigned int source = cgb.dmaSrc & 0xFFFF;
 	if (source >= 0xE000) {
 		// maps 0xe000 to sram instead:
 		source -= 0x4000;
@@ -126,20 +146,15 @@ inline void cgbDmaCopyBits() {
 		mbcRead(source);
 	}
 
-	memcpy(&memoryMap[cgb.dmaDest >> 8][cgb.dmaDest & 0xFF], &memoryMap[source >> 8][source & 0xFF], 16);
+	unsigned int dest = 0x8000 | (cgb.dmaDest & 0x1FF0);
+	memcpy(&memoryMap[dest >> 8][dest & 0xFF], &memoryMap[source >> 8][source & 0xFF], 16);
 
 	cgb.dmaLeft -= 16;
-	cgb.dmaSrc += 16;
-	cgb.dmaDest += 16;
-
-	// keep dest in vram
-	if (cgb.dmaDest >= 0xA000) {
-		cgb.dmaDest -= 0x2000;
-	}
+	cgb.dmaSrc = (cgb.dmaSrc + 16) & 0xFFFF;
+	cgb.dmaDest = 0x8000 | ((dest + 16) & 0x1FF0);
 }
 
 void cgbDMAOp(unsigned char value) {
-	// only support general DMA right now:
 	if (value & 0x80) {
 		cgb.hblankDmaActive = true;
 		cpu.memory.HDMA5_cgbstat = value & 0x7F;
@@ -151,22 +166,23 @@ void cgbDMAOp(unsigned char value) {
 			cgbHBlankDMA();
 		}
 	} else if (cgb.hblankDmaActive) {
-		// just cancel the dma
-		cpu.memory.HDMA5_cgbstat = 0x80 | value;
+		// cancel the active HBlank DMA, preserving remaining length bits in HDMA5
+		cpu.memory.HDMA5_cgbstat |= 0x80;
 		cgb.hblankDmaActive = false;
 		cgb.dmaLeft = 0;
 	} else {
 		// general purpose DMA
-		cgb.dmaLeft = (value + 1) << 4;
+		unsigned int blocks = (unsigned int)value + 1U;
+		cgb.dmaLeft = blocks << 4;
 		while (cgb.dmaLeft) {
 			cgbDmaCopyBits();
 		}
 
 		// cpu clocks cost varies based on cpu speed
 		if (cgb.isDouble) {
-			cpu.clocks += 8 + 64 * value;
+			cpu.clocks += 8 + 64 * blocks;
 		} else {
-			cpu.clocks += 8 + 32 * value;
+			cpu.clocks += 8 + 32 * blocks;
 		}
 
 		// HDMA5 reads 0xFF after completing a general dma
@@ -196,7 +212,7 @@ void cgbHBlankDMA() {
 	}
 }
 
-const int translateColor[32] =
+const unsigned int translateColor[32] =
 {
 	0, 1, 2, 3, 4, 6, 7, 9,
 	11, 12, 13, 14, 15, 16, 18, 19,
@@ -207,11 +223,11 @@ const int translateColor[32] =
 void cgbResolvePalette() {
 	for (int i = 0; i < 64; i++) {
 		// simply shuffling the high bit to the bottom for now
-		int palColor = cgb.paletteMemory[i * 2] | (cgb.paletteMemory[i * 2 + 1] << 8);
-		int trx = 
+		unsigned int palColor = cgb.paletteMemory[i * 2] | ((unsigned int)cgb.paletteMemory[i * 2 + 1] << 8);
+		unsigned int trx =
 			(translateColor[palColor & 0x001F] << 11) |			// red
-			(translateColor[(palColor & 0x03E0) >> 5] << 6) |			// green
-			(translateColor[(palColor & 0x7C00) >> 10]);			// blue
+			(translateColor[(palColor & 0x03E0) >> 5] << 6) |	// green
+			(translateColor[(palColor & 0x7C00) >> 10]);		// blue
 
 		ppuPalette[i] = trx | (trx << 16);
 	}
@@ -232,7 +248,7 @@ void cgbOnStateLoad() {
 }
 
 void cgbCleanup() {
-	DebugAssert(cgb.isCGB);
+	if (!cgb.isCGB) return;
 
 	// switch back to single speed
 	if (cgb.isDouble) {
@@ -241,8 +257,10 @@ void cgbCleanup() {
 
 	// clean up additional work RAM banks
 	for (int i = 0; i < 6; i++) {
-		delete cgb_wram[i];
-		cgb_wram[i] = NULL;
+		if (cgb_wram[i]) {
+			delete cgb_wram[i];
+			cgb_wram[i] = NULL;
+		}
 	}
 
 	// no longer in CGB mode!

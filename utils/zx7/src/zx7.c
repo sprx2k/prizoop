@@ -33,10 +33,24 @@ extern "C" {
 
 // ZX7 Compress the given data, outData is malloc'd and the return value is the length (first 3 bytes of data will be 24-bit size result for convenience)
 unsigned int ZX7Compress(const unsigned char *srcData, unsigned int inLength, unsigned char** outData) {
-	unsigned int output_size;
-    *outData = compress(optimize(srcData, inLength, 0), srcData, inLength, 0, &output_size);
+	unsigned int output_size = 0;
+	Optimal *opt;
 
-	return output_size;
+	if (!outData) {
+		return 0;
+	}
+	*outData = 0;
+	if (!srcData || inLength == 0 || inLength > 0xFFFFFF) {
+		return 0;
+	}
+
+	opt = optimize(srcData, inLength, 0);
+	if (!opt) {
+		return 0;
+	}
+
+	*outData = compress(opt, srcData, inLength, 0, &output_size);
+	return *outData ? output_size : 0;
 }
 
 #ifdef __cplusplus

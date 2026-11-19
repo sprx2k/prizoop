@@ -1,3 +1,6 @@
+#ifndef _FXCG_SYSTEM_H
+#define _FXCG_SYSTEM_H
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -50,4 +53,6 @@ int MB_ElementCount(char* buf); // like strlen but for the graphical length of m
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

@@ -72,11 +72,19 @@ unsigned char *compress(Optimal *optimal, const unsigned char *input_data, unsig
     int mask;
     int i;
 
+    if (!optimal || !input_data || !output_size || input_size == 0 || input_size > 0xFFFFFF || skip < 0 || (unsigned long)skip >= input_size) {
+        if (optimal) free(optimal);
+        if (output_size) *output_size = 0;
+        return 0;
+    }
+
     /* calculate and allocate output buffer */
     input_index = input_size-1;
     *output_size = (optimal[input_index].bits+18+7)/8 + 3;
     unsigned char* ret = (unsigned char *)malloc(*output_size);
     if (!ret) {
+		free(optimal);
+		*output_size = 0;
 		return 0;
     }
 

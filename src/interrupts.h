@@ -8,13 +8,7 @@
 
 // avoid calling interrupt step based on this check:
 inline bool interruptCheck() {
-	// same as below except uses integer math:
-	//	return (cpu.clocks >= cpu.timerInterrupt) || (cpu.memory.IE_intenable & cpu.memory.IF_intflag);
-#ifdef LITTLE_E
-	return (cpu.clocks >= cpu.timerInterrupt) || (cpu.memory.longs[0x03] & cpu.memory.longs[0x3f] & 0xFF000000);
-#else
-	return (cpu.clocks >= cpu.timerInterrupt) || (cpu.memory.longs[0x03] & cpu.memory.longs[0x3f] & 0xFF);
-#endif
+	return (cpu.clocks >= cpu.timerInterrupt) || ((cpu.memory.IE_intenable & cpu.memory.IF_intflag & 0x1F) != 0);
 }
 
 void interruptStep(void);

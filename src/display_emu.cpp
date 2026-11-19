@@ -14,9 +14,9 @@ unsigned int framecounter = 0;
 bool skippingFrame = false;
 int frameSkip = 0;
 
-unsigned char useLineBuffer[lineBufferSize] = { 0 };
+unsigned char useLineBuffer[lineBufferSize] ALIGN(4) = { 0 };
 unsigned char* lineBuffer = useLineBuffer;
-unsigned char prevLineBuffer[168] = { 0 };
+unsigned char prevLineBuffer[168] ALIGN(4) = { 0 };
 
 #include "tilerow.inl"
 #include "dmg_scanline.inl"
@@ -180,6 +180,9 @@ void SetupDisplayDriver(char withFrameskip) {
 	drawFramebuffer = drawEmu;
 	renderScanline = renderEmu;
 	renderBlankScanline = renderBlankEmu;
+}
+
+void TeardownDisplayDriver(void) {
 }
 
 #endif

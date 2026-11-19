@@ -1,15 +1,34 @@
-
 #include "platform.h"
 
 #include "memory.h"
 #include "debug.h"
 #include "mbc.h"
 #include "cgb.h"
+#include "exam_mode.h"
 
 #include "rom.h"
 
 static char curRomFile[64];
 static char curSaveFile[64];
+
+bool isStorageLockedSafe(void) {
+	bool hadRom = mbc.romFile >= 0;
+	if (hadRom) {
+		Bfile_CloseFile_OS(mbc.romFile);
+		mbc.romFile = -1;
+	}
+
+	bool locked = isStorageLockedOrExamMode();
+
+	if (hadRom && !locked && curRomFile[0]) {
+		unsigned short pFile[256];
+		Bfile_StrToName_ncpy(pFile, (const char*)curRomFile, strlen(curRomFile) + 2);
+		mbc.romFile = Bfile_OpenFile_OS(pFile, READ, 0);
+		mbcFileUpdate();
+	}
+
+	return locked;
+}
 
 unsigned char loadROM(const char *filename) {
 	char name[17];
@@ -51,14 +70,15 @@ unsigned char loadROM(const char *filename) {
 	}
 
 	length = Bfile_GetFileSize_OS(hFile);
-	if(length < 0x180) {
+	if (length < 0x180) {
 		printf("ROM is too small! (%d bytes)\n", length);
 		Bfile_CloseFile_OS(hFile);
 		return 0;
 	}
 
-	if (length > 4 * 1024 * 1024) {
-		// 4 MB max
+	int maxAllowedSize = isCompressed ? (4 * 1024 * 1024 + 8192) : (4 * 1024 * 1024);
+	if (length > maxAllowedSize) {
+		// 4 MB max (plus header/table overhead for .gbz)
 		printf("ROM is too big! (%d kbytes)\n", length / 1024);
 		Bfile_CloseFile_OS(hFile);
 		return 0;
@@ -84,12 +104,22 @@ unsigned char loadROM(const char *filename) {
 		printf("GB ROM name: %s %s\n", name, isCompressed ? "(gbz)" : "");
 	}
 
-	resetMemoryMaps(isCGB);
+	if (!resetMemoryMaps(isCGB)) {
+		printf("Out of memory for VRAM!\n");
+		Bfile_CloseFile_OS(hFile);
+		unloadROM();
+		return 0;
+	}
 	cpuReset();
 
 	if (isCGB) {
 		// init CGB mode
-		cgbInitROM();
+		if (!cgbInitROM()) {
+			printf("Out of memory for CGB WRAM!\n");
+			Bfile_CloseFile_OS(hFile);
+			unloadROM();
+			return 0;
+		}
 	} else {
 		cgb.isCGB = false;
 	}
@@ -129,7 +159,8 @@ unsigned char loadROM(const char *filename) {
 		}
 		EndianSwap(numPages);
 
-		if (numPages < 4 || numPages > 1024) {
+		unsigned int minPages = (unsigned int)mbc.numRomBanks * 4;
+		if (numPages < 4 || numPages > 1024 || numPages < minPages) {
 			printf("Invalid gbz page count: %d\n", numPages);
 			mbc.batteryBacked = 0;
 			unloadROM();
@@ -146,7 +177,20 @@ unsigned char loadROM(const char *filename) {
 			return 0;
 		}
 		numCompressedPages = numPages;
-		int curPos = Bfile_TellFile_OS(hFile) + 2 * numPages;
+		int tableStart = Bfile_TellFile_OS(hFile);
+		if (tableStart < 0) {
+			printf("Invalid gbz file position!\n");
+			mbc.batteryBacked = 0;
+			unloadROM();
+			return 0;
+		}
+		int curPos = tableStart + 2 * numPages;
+		if (curPos > length) {
+			printf("Truncated gbz page table!\n");
+			mbc.batteryBacked = 0;
+			unloadROM();
+			return 0;
+		}
 		compressedPages[0] = curPos;
 		for (int i = 1; i <= numPages; i++) {
 			unsigned short pageSize = 0;
@@ -158,7 +202,7 @@ unsigned char loadROM(const char *filename) {
 			}
 			EndianSwap(pageSize);
 
-			if (pageSize == 0 || pageSize > 4098) {
+			if (pageSize == 0 || pageSize > 4098 || (pageSize != 4098 && pageSize < 4)) {
 				printf("Invalid gbz page size!\n");
 				mbc.batteryBacked = 0;
 				unloadROM();
@@ -166,6 +210,12 @@ unsigned char loadROM(const char *filename) {
 			}
 			
 			curPos += pageSize;
+			if (curPos > length) {
+				printf("Truncated gbz page data!\n");
+				mbc.batteryBacked = 0;
+				unloadROM();
+				return 0;
+			}
 			compressedPages[i] = curPos;
 		}
 		DebugAssert(Bfile_TellFile_OS(hFile) == compressedPages[0]);
@@ -208,6 +258,8 @@ void unloadROM(void) {
 
 	saveRAM();
 	mbc.batteryBacked = 0;
+	curRomFile[0] = '\0';
+	curSaveFile[0] = '\0';
 
 	if (compressedPages) {
 		free((void*)compressedPages);
@@ -228,7 +280,7 @@ void unloadROM(void) {
 }
 
 void saveRAM(void) {
-	if (mbc.batteryBacked) {
+	if (mbc.batteryBacked && curSaveFile[0]) {
 		trySaveSRAM(curSaveFile);
 	}
 }

@@ -17,6 +17,7 @@ LONGLONG ScopeTimer_Start = 0;
 #endif
 
 #include <stdio.h>
+#include "config.h"
 #include "fxcg/display.h"
 #include "fxcg/keyboard.h"
 
@@ -107,7 +108,10 @@ void ScopeTimer::ReportFrame() {
 			totalCycles += cycleRoll[i];
 		}
 
-		fpsValue = GetCycleFrameTime() * 100 / (totalCycles / 1200);
+		int denom = totalCycles / 1200;
+		if (denom > 0) {
+			fpsValue = GetCycleFrameTime() * 100 / denom;
+		}
 	}
 
 	lastFrame = curFrame;
@@ -238,18 +242,19 @@ void ScopeTimer::DisplayTimes() {
 			switch (mode) {
 				case 0:
 				{
-					int percent = curTimer->cycleCount / (maxCycles / 1000);
+					unsigned int div = maxCycles / 1000;
+					int percent = (div > 0) ? (int)(curTimer->cycleCount / div) : 0;
 					sprintf(info, "%d.%d", percent / 10, percent % 10);
-					isMax = curTimer->cycleCount == maxCycles;
+					isMax = (maxCycles > 0) && (curTimer->cycleCount == maxCycles);
 					break;
 				}
 				case 1:
 					sprintf(info, "%dk", curTimer->cycleCount / 1024);
-					isMax = curTimer->cycleCount == maxCycles;
+					isMax = (maxCycles > 0) && (curTimer->cycleCount == maxCycles);
 					break;
 				case 2:
 					sprintf(info, "%dk", curTimer->numCounts / 1024);
-					isMax = curTimer->numCounts == maxCount;
+					isMax = (maxCount > 0) && (curTimer->numCounts == maxCount);
 					break;
 				case 3:
 					if (curTimer->numCounts) {
@@ -258,17 +263,21 @@ void ScopeTimer::DisplayTimes() {
 						unsigned int numCounts = curTimer->numCounts;
 
 						// handle overflow
-						while (cycleCount > 2 * 1024 * 1024) {
+						while (cycleCount > 2 * 1024 * 1024 && numCounts >= 16) {
 							cycleCount /= 16;
 							numCounts /= 16;
 						}
 
-						unsigned int result = cycleCount * 1000 / numCounts;
-						unsigned int dec0 = (result % 1000) / 100;
-						unsigned int dec1 = (result % 100) / 10;
-						unsigned int dec2 = (result % 10);
+						if (numCounts > 0) {
+							unsigned int result = cycleCount * 1000 / numCounts;
+							unsigned int dec0 = (result % 1000) / 100;
+							unsigned int dec1 = (result % 100) / 10;
+							unsigned int dec2 = (result % 10);
 
-						sprintf(info, "%d.%d%d%d", result / 1000, dec0, dec1, dec2);
+							sprintf(info, "%d.%d%d%d", result / 1000, dec0, dec1, dec2);
+						} else {
+							strcpy(info, "N/A");
+						}
 					} else
 						strcpy(info, "N/A");
 					isMax = false;
@@ -285,7 +294,7 @@ void ScopeTimer::DisplayTimes() {
 
 		char fpsBuffer[50] = { 0 };
 		FPSToBuffer(fpsBuffer);
-		PrintInfo(13, fpsBuffer, "F3: Clear values", COLOR_LIGHTBLUE);
+		PrintInfo(13, fpsBuffer, PRIZOOP_SEL("F3: Clear values", "PGDN: Clear values"), COLOR_LIGHTBLUE);
 
 		GetKey(&toKey);
 		
@@ -306,7 +315,7 @@ void ScopeTimer::DisplayTimes() {
 			case KEY_CTRL_LEFT:
 				mode = (mode + numModes - 1) % numModes;
 				break;
-			case KEY_CTRL_F3:
+			case PRIZOOP_SEL(KEY_CTRL_F3, 30066):
 			{
 				ScopeTimer* curTimer = firstTimer;
 				while (curTimer) {
@@ -314,6 +323,8 @@ void ScopeTimer::DisplayTimes() {
 					curTimer->numCounts = 0;
 					curTimer = curTimer->nextTimer;
 				}
+				maxCycles = 0;
+				maxCount = 0;
 				break;
 			}
 		}

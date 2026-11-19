@@ -56,23 +56,35 @@ static int curScanBuffer = 0;
 // current line within the scanline buffer
 static int curScan = 0;
 
-static void SelectVRAMDataRegister(void) {
+static unsigned short vramDataRegister = LCD_GRAM;
+static unsigned int collectedTime = 0;
+static unsigned int collectedFrames = 0;
+
+static void ProbeVRAMDataRegister(void) {
 	Bdisp_DDRegisterSelect(0xDA);
-	if (*DISPLAY == 0x32 || *DISPLAY == 0x52) {
-		Bdisp_DDRegisterSelect(0x2C);
-	} else {
-		Bdisp_DDRegisterSelect(LCD_GRAM);
-	}
+	unsigned short id = (*DISPLAY) & 0xFF;
+	vramDataRegister = (id == 0x32 || id == 0x52) ? 0x2C : LCD_GRAM;
+}
+
+static inline void SelectVRAMDataRegister(void) {
+	Bdisp_DDRegisterSelect(vramDataRegister);
 }
 
 void DmaWaitNext(void) {
-	// enable burst mode now that we are waiting
-	// *DMA0_CHCR_0 |= 0x20;
+	// ensure DMA0 module is not clock-gated before accessing its registers
+	*((volatile unsigned*)MSTPCR0) &= ~(1 << 21);
+
+	if (!((*DMA0_DMAOR & 1) && (*DMA0_CHCR_0 & 1))) {
+		*DMA0_CHCR_0 &= ~1;
+		*DMA0_DMAOR = 0;
+		return;
+	}
+
 	int maxIter = 200000;
 	while (maxIter--) {
-		if ((*DMA0_DMAOR) & 4)//Address error has occurred stop looping
+		if ((*DMA0_DMAOR) & 6) // Address error or NMI has occurred, stop looping
 			break;
-		if ((*DMA0_CHCR_0) & 2)//Transfer is done
+		if ((*DMA0_CHCR_0) & 2) // Transfer is done
 			break;
 
 		condSoundUpdate();
@@ -84,11 +96,13 @@ void DmaWaitNext(void) {
 }
 
 void DmaDrawStrip(void* srcAddress, unsigned int size) {
+	// ungate DMA0 before touching registers
+	*((volatile unsigned*)MSTPCR0) &= ~(1 << 21);
+
 	// disable dma so we can issue new command
 	*DMA0_CHCR_0 &= ~1;
 	*DMA0_DMAOR = 0;
 
-	*((volatile unsigned*)MSTPCR0) &= ~(1 << 21);//Clear bit 21
 	*DMA0_SAR_0 = ((unsigned int)srcAddress);           //Source address is VRAM
 	*DMA0_DAR_0 = LCD_BASE & 0x1FFFFFFF;				//Destination is LCD
 	*DMA0_TCR_0 = size / 32;							//Transfer count bytes/32
@@ -97,6 +111,12 @@ void DmaDrawStrip(void* srcAddress, unsigned int size) {
 	*DMA0_DMAOR &= ~6;//Clear flags
 
 	*DMA0_CHCR_0 |= 1;//Enable channel0 DMA
+}
+
+void TeardownDisplayDriver(void) {
+	DmaWaitNext();
+	Bdisp_WriteDDRegister3_bit7(0);
+	REG_TMU_TSTR &= ~(1 << 1);
 }
 
 inline void flushScanBuffer(int startX, int endX, int startY, int endY, int scanBufferSize) {
@@ -350,21 +370,21 @@ void drawFramebufferMain(void) {
 		tmu1Clocks = counterStart - REG_TMU_TCNT_1;
 
 		// auto frameskip adjustment based on pre clamped time
-		static unsigned int collectedTime = 0;
-		static unsigned int collectedFrames = 0;
-		collectedTime += tmu1Clocks;
-		collectedFrames++;
-		if (frameSkip < 0 && collectedFrames > 12) {
-			int speedUpTime = simFrameTime * 95 / 100;
-			int slowDownTime = simFrameTime * 105 / 100;
-			int avgTime = collectedTime / collectedFrames;
-			collectedTime = 0;
-			collectedFrames = 0;
+		if (frameSkip < 0) {
+			collectedTime += tmu1Clocks;
+			collectedFrames++;
+			if (collectedFrames > 12) {
+				int speedUpTime = simFrameTime * 95 / 100;
+				int slowDownTime = simFrameTime * 105 / 100;
+				int avgTime = collectedTime / collectedFrames;
+				collectedTime = 0;
+				collectedFrames = 0;
 
-			if (avgTime < speedUpTime && frameSkip != -1) {
-				frameSkip++;
-			} else if (avgTime > slowDownTime && frameSkip != -25) {
-				frameSkip--;
+				if (avgTime < speedUpTime && frameSkip != -1) {
+					frameSkip++;
+				} else if (avgTime > slowDownTime && frameSkip != -25) {
+					frameSkip--;
+				}
 			}
 		}
 
@@ -389,13 +409,16 @@ void drawFramebufferMain(void) {
 	totalClocks += tmu1Clocks;
 	if (framecounter % 256 == 0) {
 		static int fps = 0;
-		int curfps = ((143994 * 256 * Ptune2_GetPLLFreq()) >> Ptune2_GetPFCDiv()) / totalClocks;
+		if (totalClocks > 0) {
+			long long num = ((long long)143994 * 256 * Ptune2_GetPLLFreq()) >> Ptune2_GetPFCDiv();
+			int curfps = (int)(num / totalClocks);
 
-		if (curfps != fps) {
-			fps = curfps;
-			// report frame rate:
-			memset(ScopeTimer::debugString, 0, sizeof(ScopeTimer::debugString));
-			sprintf(ScopeTimer::debugString, "FPS:%d.%d, Skip:%d", fps / 10, fps % 10, frameSkip);
+			if (curfps != fps) {
+				fps = curfps;
+				// report frame rate:
+				memset(ScopeTimer::debugString, 0, sizeof(ScopeTimer::debugString));
+				sprintf(ScopeTimer::debugString, "FPS:%d.%d, Skip:%d", fps / 10, fps % 10, frameSkip);
+			}
 		}
 
 		totalClocks = 0;
@@ -406,13 +429,12 @@ void drawFramebufferMain(void) {
 	skippingFrame = false;
 	if (frameSkip && framecounter > 4) {
 		if (frameSkip < 0) {
-			// reverse the bits of the previous frame counter xor'd with this one and
-			// compare against our ratio:
-			int f = (framecounter % 32) ^ ((framecounter + 1) % 32);
-			f = ((f & 0x10) >> 4) | ((f & 0x8) >> 2) | ((f & 0x2) << 2) | ((f & 0x01) << 4);
+			// bit-reverse framecounter mod 32 for evenly distributed frame skips
+			int f = framecounter & 31;
+			f = ((f & 0x10) >> 4) | ((f & 0x08) >> 2) | (f & 0x04) | ((f & 0x02) << 2) | ((f & 0x01) << 4);
 
 			// negative is automatic (frame skip amt stored in HOW negative it is)
-			skippingFrame = f < -frameSkip;
+			skippingFrame = f < (-frameSkip);
 		} else {
 			skippingFrame = (framecounter % (frameSkip + 1)) != 0;
 		}
@@ -420,25 +442,30 @@ void drawFramebufferMain(void) {
 
 	if (emulator.settings.sound) sndUpdate();
 
+	// frame end.. wait for DMA and reset line buffer state even when skipping the next frame
+	DmaWaitNext();
+	*((volatile unsigned*)MSTPCR0) &= ~(1 << 21);//Clear bit 21
+	curScan = 0;
+	lineBuffer = ((unsigned char*)0xE5017000);
+
 	if (skippingFrame) {
 		refreshKeys(false);
 		return;
 	}
-
-	// frame end.. kill DMA operations to make sure they stay in sync
-	DmaWaitNext();
-	*((volatile unsigned*)MSTPCR0) &= ~(1 << 21);//Clear bit 21
-	curScan = 0;
 
 	// good time to refresh keys and check for os requests and such
 	refreshKeys(true);
 }
 
 void SetupDisplayDriver(char withFrameskip) {
+	ProbeVRAMDataRegister();
+
 	frameSkip = withFrameskip;
 	skippingFrame = false;
 	curScanBuffer = 0;
 	curScan = 0;
+	collectedTime = 0;
+	collectedFrames = 0;
 
 	drawFramebuffer = drawFramebufferMain;
 

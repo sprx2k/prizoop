@@ -27,7 +27,7 @@ For deep technical details on what failed previously and how the fx-CG100 port, 
 5. Safely eject the calculator before unplugging USB.
 6. On **fx-CG100 / Graph Math+**, go to **HOME** and press **TOOLS** to open the MPM add-in menu, then select **Prizoop**.
 
-> **Storage Note:** The fx-CG100 exposes ~4.5 MB of USB storage memory by default. Large GBC ROMs (1–4 MB) fit more easily if compressed to `.gbz` with `comp-gb/comp-gb.exe` on Windows.
+> **Storage Note:** The fx-CG100 exposes ~4.5 MB of USB storage memory by default. Large GBC ROMs (1–4 MB) fit more easily if compressed to `.gbz` (source for the Windows compressor is in `comp-gb/comp-gb.cpp`).
 
 ## Exam Mode Restriction
 
@@ -37,8 +37,8 @@ Prizoop enforces Examination Mode restrictions at two layers:
    - On **fx-CG100 / Graph Math+**, MPM checks Examination Mode and disables the `HOME -> TOOLS` add-in launcher (`mpm.bin` will not run while Exam Mode is active).
    - On **fx-CG50**, CASIOWIN blocks third-party `.g3a` add-ins during Examination Mode.
 2. **In-App Locked-Storage Guard (Defense-in-Depth):**
-   - Because Casio OS restricts `\\fls0\` storage memory access in Examination Mode, Prizoop verifies storage accessibility at startup (`src/exam_mode.cpp`), in the ROM browser (`src/screen_rom.cpp`), and before ROM initialization (`src/screen_play.cpp`).
-   - If storage memory is locked/restricted, Prizoop displays an `"ACCESS DISABLED (EXAM MODE)"` notice and blocks browsing or launching ROMs.
+   - Because Casio OS restricts `\\fls0\` storage memory access in Examination Mode, Prizoop verifies storage accessibility at startup (`src/exam_mode.cpp`), in the ROM browser (`src/screen_rom.cpp`), FAQ viewer (`src/screen_faq.cpp`), save/load state (`src/emulator.cpp`), and before ROM initialization (`src/screen_play.cpp`).
+   - If storage memory is locked/restricted, Prizoop displays an `"ACCESS DISABLED (EXAM MODE)"` notice and blocks browsing, viewing FAQs, saving/loading states, or launching ROMs.
 
 ## Controls
 
@@ -46,13 +46,13 @@ Prizoop enforces Examination Mode restrictions at two layers:
 
 - **D-Pad (Arrows):** Navigate ROMs, settings, and FAQ
 - **SHIFT** or **EXE / OK:** Select / Launch ROM / Toggle option
-- **SETTINGS:** Tab 1 — Select ROM
-- **HOME:** Tab 2 — Settings
-- **>| (END):** Tab 5 — FAQ Viewer
+- **|< (PREVTAB):** Tab 1 — Select ROM
+- **SETTINGS:** Tab 2 — Settings
+- **>| (NEXTTAB):** Tab 5 — FAQ Viewer
 - **PGUP:** Tab 6 — Play / Load ROM
 - **BACK:** Exit Prizoop and return to OS / MPM
 
-*(On fx-CG50, the top function keys `F1`–`F6` correspond to Tabs 1–6 and `MENU` exits.)*
+*(Note: `HOME` is intentionally not bound to a menu tab because Casio OS intercepts `HOME` inside `GetKey()` to return to the calculator Home screen. On fx-CG50, the top function keys `F1`–`F6` correspond to Tabs 1–6 and `MENU` exits.)*
 
 ### In-Game Default Controls (fx-CG100 / Graph Math+)
 
@@ -63,18 +63,20 @@ All buttons can be remapped in **Settings -> Map Keys** (press **HOME** during m
 | D-Pad | Arrow Keys | Arrow Keys |
 | A | `SHIFT` | `SHIFT` |
 | B | `ALPHA` | `OPTN` |
-| Select | `>\|` (END) | `F5` |
+| Select | `>\|` (NEXTTAB) | `F5` |
 | Start | `PGUP` | `F6` |
 | Save State | `×` (Multiply) | `×` (Alpha `S`) |
 | Load State | `)` | `→` (Alpha `L`) |
 | Pause / Options | `HOME` | `MENU` |
-| Volume + / - | `+` / `-` | `+` / `-` |
+| Volume + / - | *(N/A — no audio jack)* | `+` / `-` |
 
-> **Note:** Hardware overclock (`Ptune2`) is automatically disabled on fx-CG100 and fx-CG50 (`Ptune2` timings are specific to fx-CG10/CG20). Do not force CG20 overclock registers on CG100.
+> **Hardware Notes:**
+> - Hardware overclock (`Ptune2`) is automatically disabled on fx-CG100 and fx-CG50 (`Ptune2` timings are specific to fx-CG10/CG20). Do not force CG20 overclock registers on CG50/CG100.
+> - Audio output via the 2.5mm serial port (`SCIF2`) is disabled on fx-CG100 / Graph Math+ because those models lack a 2.5mm jack.
 
 ## Building from Source (fxSDK)
 
-Prizoop is built via CMake and **fxSDK** (`FXCG50.cmake`) with `gint`/`fxlibc` installed via `giteapc`:
+Prizoop is built via CMake and **fxSDK** (`FXCG50.cmake`) with `fxlibc` and `openlibm` installed via `giteapc`:
 
 ```bash
 # fx-CG100 / Graph Math+
@@ -91,5 +93,5 @@ See `.github/workflows/build-g3a.yml` for the automated Ubuntu 24.04 + `giteapc`
 ## Credits & Acknowledgements
 
 - Original **Prizoop** by `tswilliamson`, based on **Cinoop** by `CTurt`.
-- **fxSDK / gint / fxlibc / MPM** by `Lephenixnoir` and the Planète Casio community.
+- **fxSDK / fxlibc / MPM** by `Lephenixnoir` and the Planète Casio community.
 - **fx-CG100 / ClassWiz syscall mapping (`casiowin.yaml`) and LCD `0xDA` DMA detection** adapted from community fxSDK porting work (`bju12290/prizoop-50` and `0v0katai/fxcraft`).

@@ -14,6 +14,11 @@
 #include "calctype/fonts/arial_small/arial_small.h"
 
 void emulator_screen::DrawBG(const char* filepath) {
+	if (!filepath || strlen(filepath) >= 511) {
+		memset(GetVRAMAddress(), 0x00, 2 * LCD_HEIGHT_PX * LCD_WIDTH_PX);
+		return;
+	}
+
 	// try to load the file
 	unsigned short fileAsName[512];
 	Bfile_StrToName_ncpy(fileAsName, filepath, strlen(filepath) + 1);
@@ -25,18 +30,20 @@ void emulator_screen::DrawBG(const char* filepath) {
 	}
 
 	unsigned char header[54];
-	Bfile_ReadFile_OS(file, header, 54, -1); // read the 54-byte header
+	if (Bfile_ReadFile_OS(file, header, 54, -1) != 54) { // read the 54-byte header
+		Bfile_CloseFile_OS(file);
+		memset(GetVRAMAddress(), 0x00, 2 * LCD_HEIGHT_PX * LCD_WIDTH_PX);
+		return;
+	}
 
-											 // extract image height and width from header
+	// extract image height and width from header
 	signed short width = header[18] + 256 * header[19];
 	signed short height = header[22] + 256 * header[23];
 	signed short depth = header[28] + 256 * header[29];
 	if (height < 0) height = -height;
 
-	// currently only support full screen images
-	DebugAssert(width == 384 && height == 216);
-
-	if (depth != 16) {
+	// currently only support full screen 16-bit images
+	if (width != 384 || height != 216 || depth != 16) {
 		Bfile_CloseFile_OS(file);
 		memset(GetVRAMAddress(), 0x00, 2 * LCD_HEIGHT_PX * LCD_WIDTH_PX);
 		return;
@@ -45,7 +52,9 @@ void emulator_screen::DrawBG(const char* filepath) {
 	// each row:
 	unsigned short color[384];
 	for (int y = 0; y < 216; y++) {
-		Bfile_ReadFile_OS(file, color, 2 * width, -1);
+		if (Bfile_ReadFile_OS(file, color, 2 * width, -1) != 2 * width) {
+			break;
+		}
 		// assuming format is endian flipped BGR:
 #ifdef BIG_E
 		for (int x = 0; x < width; x++) {
@@ -88,8 +97,20 @@ void emulator_screen::DrawBG(const char* filepath) {
 	DrawFrame(0);
 }
 
-void emulator_screen::DrawBGEmbedded(unsigned char* compressedData) {
-	ZX7Decompress(compressedData, (unsigned char*) GetVRAMAddress(), 384 * 216 * 2);
+static unsigned int getEmbeddedBGSize(const unsigned char* compressedData) {
+	if (compressedData == bg_menu) return bg_menu_size;
+	if (compressedData == bg_1x1) return bg_1x1_size;
+	if (compressedData == bg_fit) return bg_fit_size;
+	if (compressedData == bg_faq) return bg_faq_size;
+	return 0;
+}
+
+void emulator_screen::DrawBGEmbedded(const unsigned char* compressedData) {
+	unsigned int compressedSize = getEmbeddedBGSize(compressedData);
+	if (compressedSize == 0 || ZX7Decompress(compressedData, compressedSize, (unsigned char*)GetVRAMAddress(), 384 * 216 * 2) != 0) {
+		memset(GetVRAMAddress(), 0x00, 2 * LCD_HEIGHT_PX * LCD_WIDTH_PX);
+		return;
+	}
 
 #ifdef BIG_E
 	unsigned short* data = (unsigned short*)GetVRAMAddress();
@@ -155,7 +176,7 @@ void emulator_screen::DrawPausePreview() {
 	for (int y = 0; y < 72; y++) {
 		if (cgb.isCGB) {
 			for (int x = 0; x < 80; x++, pause++) {
-				unsigned int color = ppuPalette[*pause] & 0xFFFF;
+				unsigned int color = ppuPalette[(*pause) & 0x3F] & 0xFFFF;
 				vramStart[x + y * LCD_WIDTH_PX] = color;
 			}
 		} else {
@@ -187,7 +208,7 @@ void emulator_screen::ResolveBG(const unsigned char* data) {
 	}
 
 	if (needsLoad) {
-		DrawBGEmbedded((unsigned char*) data);
+		DrawBGEmbedded(data);
 		SaveVRAM_1();
 	}
 

@@ -35,7 +35,7 @@ struct cgbworkram_type {
 extern cgbworkram_type* cgb_wram[6];
 
 // additional ROM/memory init needed for cgb
-void cgbInitROM();
+bool cgbInitROM();
 
 // select the given work ram (indicating 0 will select bank 1)
 void cgbSelectWRAM(int ramBank, bool force = false);

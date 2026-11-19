@@ -3,6 +3,7 @@
 
 #include "snd.h"
 #include "snd_private.h"
+#include "config.h"
 #include "../ptune2_simple/Ptune2_direct.h"
 #include "fxcg/serial.h"
 #include "fxcg/display.h"
@@ -105,26 +106,35 @@ struct st_scif0 {                                      /* struct SCIF0 */
 
 #define SCIF2 (*(volatile struct st_scif0 *)0xA4410000)/* SCIF0 Address */
 
-#define BUFF_SIZE (SOUND_RATE / 64)
+// Multiple of 4 so sndFrame() fills the entire buffer evenly (448 = 4 * 112)
+#define BUFF_SIZE ((SOUND_RATE / 64) & ~3)
 
-unsigned int lastSoundCounter;
+unsigned int lastSoundCounter = 0;
 
 static int curSoundBuffer[BUFF_SIZE];
-static int sampleNum = 0;
+static int sampleNum = BUFF_SIZE;
+static bool sSerialOpened = false;
 
 // initializes the platform sound system, called when emulation begins. Returns false on error
 bool sndInit() {
+#if PRIZOOP_IS_CW
+	return false;
+#else
 	unsigned char settings[5] = { 0,9,0,0,0 };//115200,1xstop bits
 	if (Serial_Open(&settings[0]))
 	{
 		return false;
 	}
 
+	sSerialOpened = true;
+
+	// Disable TE/RE before modifying SCSMR and SCBRR per SH7305 SCIF specification
+	unsigned short savedScscr = SCIF2.SCSCR.WORD;
+	SCIF2.SCSCR.BIT.TE = 0;
+	SCIF2.SCSCR.BIT.RE = 0;
+
 	SCIF2.SCSMR.BIT.CKS = 0;	//1/1
 	SCIF2.SCSMR.BIT.CA = 1;		//Synchronous mode is 16 times faster
-
-	sampleNum = 0;
-	lastSoundCounter = 0x7FFFFFFF;
 
 	// tune bitrate based on clock speed
 	if (getDeviceType() == DT_CG50) {
@@ -144,7 +154,18 @@ bool sndInit() {
 		}
 	}
 
+	SCIF2.SCSCR.WORD = savedScscr;
+
+	sampleNum = BUFF_SIZE;
+	lastSoundCounter = 0;
+
 	return true;
+#endif
+}
+
+void sndResetSync() {
+	sampleNum = BUFF_SIZE;
+	lastSoundCounter = 0;
 }
 
 static void feed() {
@@ -154,45 +175,62 @@ static void feed() {
 
 // platform update from emulator for sound system, called 8 times per frame (should be enough!)
 void sndUpdate() {
-	{
-		int toAdd = Serial_PollTX() & 0x1FE;
+	if (!sSerialOpened) {
+		return;
+	}
 
-		// perform this update every 1/360th of a second or so
-		lastSoundCounter = REG_TMU_TCNT_1 - 40;
+	lastSoundCounter = REG_TMU_TCNT_1;
 
-		if (toAdd > 1)
-		{
-			unsigned char writeBuffer[256];
-			if (toAdd > (int)sizeof(writeBuffer)) {
-				toAdd = (int)sizeof(writeBuffer);
-			}
-			int samplesRemaining = toAdd / 2;
-			unsigned char* curWrite = writeBuffer;
-			int samplesWritten = samplesRemaining;
-			while (samplesRemaining) {
-				int samplesInBuffer = BUFF_SIZE - sampleNum;
-				if (samplesInBuffer < samplesRemaining) {
-					ConvertSamples(&curSoundBuffer[sampleNum], curWrite, samplesInBuffer);
-					curWrite += samplesInBuffer * 2;
-					samplesRemaining -= samplesInBuffer;
+	int avail = Serial_PollTX();
+	if (avail <= 1) {
+		return;
+	}
 
-					feed();
-				} else {
-					ConvertSamples(&curSoundBuffer[sampleNum], curWrite, samplesRemaining);
-					curWrite += samplesRemaining * 2;
-					sampleNum += samplesRemaining;
-					samplesRemaining = 0;
-				}
-			}
+	int toAdd = avail & 0x1FE;
+	unsigned char writeBuffer[256];
+	if (toAdd > (int)sizeof(writeBuffer)) {
+		toAdd = (int)sizeof(writeBuffer);
+	}
+	int samplesRemaining = toAdd / 2;
+	unsigned char* curWrite = writeBuffer;
+	int samplesWritten = samplesRemaining;
+	while (samplesRemaining) {
+		int samplesInBuffer = BUFF_SIZE - sampleNum;
+		if (samplesInBuffer <= 0) {
+			feed();
+			samplesInBuffer = BUFF_SIZE;
+		}
+		if (samplesInBuffer < samplesRemaining) {
+			ConvertSamples(&curSoundBuffer[sampleNum], curWrite, samplesInBuffer);
+			curWrite += samplesInBuffer * 2;
+			samplesRemaining -= samplesInBuffer;
 
-			Serial_Write(writeBuffer, samplesWritten * 2);
+			feed();
+		} else {
+			ConvertSamples(&curSoundBuffer[sampleNum], curWrite, samplesRemaining);
+			curWrite += samplesRemaining * 2;
+			sampleNum += samplesRemaining;
+			samplesRemaining = 0;
 		}
 	}
+
+	Serial_Write(writeBuffer, samplesWritten * 2);
 }
 
 // cleans up the platform sound system, called when emulation ends
 void sndCleanup() {
+	bSoundEnabled = false;
+	if (!sSerialOpened) {
+		return;
+	}
+	sSerialOpened = false;
+
+#if !PRIZOOP_IS_CW
+	SCIF2.SCSCR.BIT.TE = 0;
+	SCIF2.SCSCR.BIT.RE = 0;
+	SCIF2.SCSMR.BIT.CA = 0;
 	Serial_Close(1);
+#endif
 }
 
 #endif
